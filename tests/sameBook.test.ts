@@ -9,25 +9,35 @@ import { chapterTitleHash } from '../src/core/chapters'
 import { simhash64 } from '../src/core/text'
 import type { BookMeta, ChapterMeta, CleanedChapter } from '../src/core/model'
 
-function makeChapter(index: number, title: string, body: string): { meta: ChapterMeta; chapter: CleanedChapter } {
+function makeChapter(
+  index: number,
+  title: string,
+  body: string,
+  level: ChapterLevel = 'chapter'
+): { meta: ChapterMeta; chapter: CleanedChapter } {
   const meta: ChapterMeta = {
     index,
     title,
-    level: 'chapter',
+    level,
     titleHash: chapterTitleHash(title),
     startLine: index,
     charCount: body.length,
     simhash: simhash64(body),
     flags: {}
   }
-  return { meta, chapter: { title, level: 'chapter', startLine: index, paragraphs: [body] } }
+  return { meta, chapter: { title, level, startLine: index, paragraphs: [body] } }
 }
 
-function makeBook(id: string, titles: string[], bodyFor: (i: number) => string) {
+function makeBook(
+  id: string,
+  titles: string[],
+  bodyFor: (i: number) => string,
+  levels?: ChapterLevel[]
+) {
   const metas: ChapterMeta[] = []
   const chapters: CleanedChapter[] = []
   titles.forEach((title, i) => {
-    const built = makeChapter(i, title, bodyFor(i))
+    const built = makeChapter(i, title, bodyFor(i), levels?.[i] ?? 'chapter')
     metas.push(built.meta)
     chapters.push(built.chapter)
   })
@@ -119,5 +129,29 @@ describe('planMerge', () => {
     const earlier = makeBook('b', ['第一章', '第二章'], (i) => `前一册的正文${i}`)
     const merged = planMerge(later, earlier)
     expect(merged.map((c) => c.title)).toEqual(['前言', '第一章', '第二章', '第三章', '第四章'])
+  })
+
+  it('keeps volumes together when chapter numbers restart', () => {
+    const later = makeBook(
+      'a',
+      ['第二卷 崛起', '第一章', '第二章'],
+      (i) => `林动在第二卷的故事${i}里抬头望向天空，远处山峦起伏。`,
+      ['volume', 'chapter', 'chapter']
+    )
+    const earlier = makeBook(
+      'b',
+      ['第一卷 少年', '第一章', '第二章'],
+      (i) => `萧炎在第一卷的故事${i}里站在广场中央，四周的族人议论纷纷。`,
+      ['volume', 'chapter', 'chapter']
+    )
+    const merged = planMerge(later, earlier)
+    expect(merged.map((c) => c.title)).toEqual([
+      '第一卷 少年',
+      '第一章',
+      '第二章',
+      '第二卷 崛起',
+      '第一章',
+      '第二章'
+    ])
   })
 })

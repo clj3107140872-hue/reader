@@ -1,5 +1,5 @@
 import { parseChapterOrdinal } from './chapters'
-import type { BookMeta, CleanedChapter } from './model'
+import type { BookMeta, ChapterMeta, CleanedChapter } from './model'
 import { hammingBig, toBig, toHalfWidth } from './text'
 
 export interface MergeSource {
@@ -20,13 +20,32 @@ const NOISE_PATTERNS: RegExp[] = [
 const FRONT_MATTER = /^(前言|序言|序章|楔子|引子)/
 
 function sortMergedChapters(chapters: CleanedChapter[]): CleanedChapter[] {
+  let volumeOrdinal = -1
+  let volumeIndex = -1
   const keyed = chapters.map((chapter, index) => {
     const ordinal = parseChapterOrdinal(chapter.title)
-    if (ordinal !== null) return { chapter, index, group: 1, ordinal }
-    if (FRONT_MATTER.test(chapter.title)) return { chapter, index, group: 0, ordinal: 0 }
-    return { chapter, index, group: 2, ordinal: 0 }
+    if (chapter.level === 'volume' && ordinal !== null) {
+      volumeOrdinal = ordinal
+      volumeIndex = index
+      return { chapter, index, group: 1, volumeOrdinal: ordinal, volumeIndex: index, kind: 0, ordinal }
+    }
+    if (chapter.level === 'chapter' && ordinal !== null) {
+      return { chapter, index, group: 1, volumeOrdinal, volumeIndex, kind: 1, ordinal }
+    }
+    if (FRONT_MATTER.test(chapter.title)) {
+      return { chapter, index, group: 0, volumeOrdinal: 0, volumeIndex: 0, kind: 0, ordinal: 0 }
+    }
+    return { chapter, index, group: 1, volumeOrdinal, volumeIndex, kind: 2, ordinal: 0 }
   })
-  keyed.sort((a, b) => a.group - b.group || a.ordinal - b.ordinal || a.index - b.index)
+  keyed.sort(
+    (a, b) =>
+      a.group - b.group ||
+      a.volumeOrdinal - b.volumeOrdinal ||
+      a.volumeIndex - b.volumeIndex ||
+      a.kind - b.kind ||
+      a.ordinal - b.ordinal ||
+      a.index - b.index
+  )
   return keyed.map((entry) => entry.chapter)
 }
 
