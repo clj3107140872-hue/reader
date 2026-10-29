@@ -7,7 +7,7 @@ import {
 } from '../src/core/sameBook'
 import { chapterTitleHash } from '../src/core/chapters'
 import { simhash64 } from '../src/core/text'
-import type { BookMeta, ChapterMeta, CleanedChapter } from '../src/core/model'
+import type { BookMeta, ChapterMeta, ChapterLevel, CleanedChapter } from '../src/core/model'
 
 function makeChapter(
   index: number,
