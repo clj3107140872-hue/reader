@@ -48,4 +48,23 @@ describe('cleanChapters', () => {
     expect(result.chapters).toHaveLength(1)
     expect(result.chapters[0].paragraphs).toEqual([])
   })
+
+  it('skips rules whose pattern is invalid instead of failing', () => {
+    const rules = [
+      ...BUILTIN_AD_RULES,
+      { id: 'bad', name: '坏规则', type: 'line' as const, pattern: '求收藏(', enabled: true }
+    ]
+    const result = cleanChapters([chapter(['正文。', 'www.example.com'])], rules)
+    expect(result.chapters[0].paragraphs).toEqual(['正文。'])
+  })
+
+  it('removes ad sentences separated by ellipses too', () => {
+    const result = cleanChapters([chapter(['请记住本站……正文很短。'])], BUILTIN_AD_RULES)
+    expect(result.chapters[0].paragraphs).toEqual(['正文很短。'])
+  })
+
+  it('merges only consecutive duplicates', () => {
+    const result = cleanChapters([chapter(['甲段。', '乙段。', '甲段。'])], BUILTIN_AD_RULES)
+    expect(result.chapters[0].paragraphs).toEqual(['甲段。', '乙段。', '甲段。'])
+  })
 })

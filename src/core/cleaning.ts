@@ -29,12 +29,18 @@ export interface CleanResult {
 }
 
 export function cleanChapters(chapters: SplittedChapter[], rules: AdRule[]): CleanResult {
-  const lineRules = rules
-    .filter((rule) => rule.enabled && rule.type === 'line')
-    .map((rule) => new RegExp(rule.pattern))
-  const sentenceRules = rules
-    .filter((rule) => rule.enabled && rule.type === 'sentence')
-    .map((rule) => new RegExp(rule.pattern))
+  const lineRules: RegExp[] = []
+  const sentenceRules: RegExp[] = []
+  for (const rule of rules) {
+    if (!rule.enabled) continue
+    try {
+      const compiled = new RegExp(rule.pattern)
+      if (rule.type === 'line') lineRules.push(compiled)
+      else if (rule.type === 'sentence') sentenceRules.push(compiled)
+    } catch {
+      // Malformed user rules are skipped instead of aborting the import.
+    }
+  }
 
   let adLinesRemoved = 0
   let duplicateParagraphsMerged = 0
@@ -54,7 +60,7 @@ export function cleanChapters(chapters: SplittedChapter[], rules: AdRule[]): Cle
 
       let text = line
       if (line.length <= 30) {
-        const sentences = line.split(/(?<=[。！？!?])/)
+        const sentences = line.split(/(?<=[。！？!?…])(?![。！？!?…])/)
         const kept = sentences.filter((sentence) => !sentenceRules.some((re) => re.test(sentence)))
         if (kept.length !== sentences.length) {
           adLinesRemoved++
