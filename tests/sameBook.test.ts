@@ -40,6 +40,8 @@ describe('normalizeBookTitle', () => {
     expect(normalizeBookTitle('斗罗大陆_1-500章.txt')).toBe('斗罗大陆')
     expect(normalizeBookTitle('《斗罗大陆》501-1000章 精校版.txt')).toBe('斗罗大陆')
     expect(normalizeBookTitle('斗罗大陆[笔趣阁].txt')).toBe('斗罗大陆')
+    expect(normalizeBookTitle('斗罗大陆１－５００章.txt')).toBe('斗罗大陆')
+    expect(normalizeBookTitle('斗罗大陆第1-500章.txt')).toBe('斗罗大陆')
   })
 })
 
@@ -48,6 +50,15 @@ describe('chapterMatchRate', () => {
     const base = makeBook('a', ['第一章', '第二章'], (i) => `第${i}章的正文，内容足够长以便生成稳定的指纹。`)
     const same = makeBook('b', ['第一章', '第二章'], (i) => `第${i}章的正文，内容足够长以便生成稳定的指纹。`)
     expect(chapterMatchRate(base.meta, same.meta)).toBe(1)
+  })
+
+  it('uses the smaller book as the denominator', () => {
+    const body = '相同的正文内容，用来验证匹配率的分母。'
+    const base = makeBook('a', ['第一章'], () => body)
+    const other = makeBook('b', ['第一章', '第二章', '第三章'], (i) =>
+      i === 0 ? body : `第${i}章的完全不同内容，不会与第一本书匹配。`
+    )
+    expect(chapterMatchRate(base.meta, other.meta)).toBe(1)
   })
 
   it('returns zero for unrelated books', () => {
@@ -86,11 +97,14 @@ describe('planMerge', () => {
   })
 
   it('deduplicates overlapping chapters and keeps the longer copy', () => {
-    const body = '重叠章节的正文内容足够长，用于验证去重逻辑。'
-    const first = makeBook('a', ['第一章', '第二章'], (i) => (i === 1 ? body : `第一册第${i}章正文`))
-    const second = makeBook('b', ['第二章', '第三章'], (i) => (i === 0 ? body : `第二册第${i}章正文`))
+    const base =
+      '重叠章节的正文内容足够长，用于验证去重逻辑，并且这一段文字会在另一份文件中出现几乎完全相同的版本，只是长度略有不同。'.repeat(4)
+    const longer = base + '补充一句。'
+    const first = makeBook('a', ['第一章', '第二章'], (i) => (i === 1 ? base : `第一册第${i}章正文`))
+    const second = makeBook('b', ['第二章', '第三章'], (i) => (i === 0 ? longer : `第二册第${i}章正文`))
     const merged = planMerge(first, second)
     expect(merged.map((c) => c.title)).toEqual(['第一章', '第二章', '第三章'])
+    expect(merged[1].paragraphs).toEqual([longer])
   })
 
   it('keeps both chapters when titles match but content differs', () => {
@@ -98,5 +112,12 @@ describe('planMerge', () => {
     const second = makeBook('b', ['第一章'], () => '另一本同名书的第一章，讲的是另一个完全不同的故事。')
     const merged = planMerge(first, second)
     expect(merged).toHaveLength(2)
+  })
+
+  it('keeps numeric order when the book starts with a preface', () => {
+    const later = makeBook('a', ['前言', '第三章', '第四章'], (i) => `后一册的正文${i}`)
+    const earlier = makeBook('b', ['第一章', '第二章'], (i) => `前一册的正文${i}`)
+    const merged = planMerge(later, earlier)
+    expect(merged.map((c) => c.title)).toEqual(['前言', '第一章', '第二章', '第三章', '第四章'])
   })
 })

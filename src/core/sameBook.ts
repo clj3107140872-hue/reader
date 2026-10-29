@@ -1,6 +1,6 @@
 import { parseChapterOrdinal } from './chapters'
 import type { BookMeta, CleanedChapter } from './model'
-import { hammingBig, toBig } from './text'
+import { hammingBig, toBig, toHalfWidth } from './text'
 
 export interface MergeSource {
   meta: BookMeta
@@ -8,7 +8,7 @@ export interface MergeSource {
 }
 
 const NOISE_PATTERNS: RegExp[] = [
-  /\d+\s*[-~—至]\s*\d+\s*章?/g,
+  /第?\s*\d+\s*[-~—至]\s*\d+\s*章?/g,
   /https?:\/\/\S+/gi,
   /www\.[a-z0-9.-]+/gi,
   /《|》/g,
@@ -17,8 +17,21 @@ const NOISE_PATTERNS: RegExp[] = [
   /(笔趣阁|顶点小说|书趣阁)/g
 ]
 
+const FRONT_MATTER = /^(前言|序言|序章|楔子|引子)/
+
+function sortMergedChapters(chapters: CleanedChapter[]): CleanedChapter[] {
+  const keyed = chapters.map((chapter, index) => {
+    const ordinal = parseChapterOrdinal(chapter.title)
+    if (ordinal !== null) return { chapter, index, group: 1, ordinal }
+    if (FRONT_MATTER.test(chapter.title)) return { chapter, index, group: 0, ordinal: 0 }
+    return { chapter, index, group: 2, ordinal: 0 }
+  })
+  keyed.sort((a, b) => a.group - b.group || a.ordinal - b.ordinal || a.index - b.index)
+  return keyed.map((entry) => entry.chapter)
+}
+
 export function normalizeBookTitle(fileName: string): string {
-  let title = fileName.replace(/\.txt$/i, '')
+  let title = toHalfWidth(fileName.replace(/\.txt$/i, ''))
   for (const pattern of NOISE_PATTERNS) title = title.replace(pattern, '')
   return title.replace(/[\s_\-—]+/g, '').toLowerCase()
 }
@@ -91,12 +104,5 @@ export function planMerge(base: MergeSource, incoming: MergeSource): CleanedChap
     }
   }
 
-  const ordinals = chapters.map((chapter) => parseChapterOrdinal(chapter.title))
-  if (ordinals.every((ordinal) => ordinal !== null)) {
-    const order = chapters
-      .map((_, index) => index)
-      .sort((a, b) => ordinals[a]! - ordinals[b]! || a - b)
-    return order.map((index) => chapters[index])
-  }
-  return chapters
+  return sortMergedChapters(chapters)
 }
