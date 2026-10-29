@@ -45,6 +45,19 @@ function makeBook(
   return { meta, chapters }
 }
 
+function metaWithVolume(id: string, volumeTitle: string, body: string): BookMeta {
+  const volume = makeChapter(0, volumeTitle, '', 'volume')
+  const chapter = makeChapter(1, '第一章', body)
+  return {
+    version: 1,
+    id,
+    title: id,
+    encoding: 'utf8',
+    chapters: [volume.meta, chapter.meta],
+    createdAt: '2026-01-01T00:00:00.000Z'
+  }
+}
+
 describe('normalizeBookTitle', () => {
   it('strips volume ranges, brackets, site names and quality tags', () => {
     expect(normalizeBookTitle('斗罗大陆_1-500章.txt')).toBe('斗罗大陆')
@@ -75,6 +88,20 @@ describe('chapterMatchRate', () => {
     const base = makeBook('a', ['第一章'], () => '萧炎站在广场中央，四周的族人议论纷纷，他的拳头紧紧握着。')
     const other = makeBook('b', ['第一章'], () => '林动抬头望向天空，那里有云层翻涌，远处山峦起伏，他的心中异常平静。')
     expect(chapterMatchRate(base.meta, other.meta)).toBe(0)
+  })
+
+  it('ignores volume headers when comparing content', () => {
+    const base = metaWithVolume(
+      'a',
+      '第一卷 少年',
+      '萧炎站在广场中央，四周的族人议论纷纷，他的拳头紧紧握着。'
+    )
+    const other = metaWithVolume(
+      'b',
+      '第一卷 少年',
+      '林动抬头望向天空，那里有云层翻涌，远处山峦起伏，他的心中异常平静。'
+    )
+    expect(chapterMatchRate(base, other)).toBe(0)
   })
 })
 

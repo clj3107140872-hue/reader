@@ -56,8 +56,12 @@ export function normalizeBookTitle(fileName: string): string {
 }
 
 export function chapterMatchRate(base: BookMeta, other: BookMeta): number {
-  const small = base.chapters.length <= other.chapters.length ? base.chapters : other.chapters
-  const large = base.chapters.length <= other.chapters.length ? other.chapters : base.chapters
+  const eligible = (chapters: ChapterMeta[]): ChapterMeta[] =>
+    chapters.filter((chapter) => chapter.level !== 'volume' && chapter.charCount > 0)
+  const baseChapters = eligible(base.chapters)
+  const otherChapters = eligible(other.chapters)
+  const small = baseChapters.length <= otherChapters.length ? baseChapters : otherChapters
+  const large = baseChapters.length <= otherChapters.length ? otherChapters : baseChapters
   if (small.length === 0) return 0
 
   const index = new Map<string, bigint[]>()
