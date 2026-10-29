@@ -58,12 +58,16 @@ export class ImportService {
     const suspects: ImportOutcome['suspects'] = []
     for (const other of await this.library.list()) {
       if (other.id === entry.id) continue
-      const otherMeta = await this.books.readMeta(other.id)
-      const overlap = chapterMatchRate(parsed.meta, otherMeta)
-      const sameTitle =
-        Boolean(entry.normalizedTitle) && entry.normalizedTitle === other.normalizedTitle
-      if (sameTitle || overlap >= 0.05) {
-        suspects.push({ id: other.id, title: other.title, overlap })
+      try {
+        const otherMeta = await this.books.readMeta(other.id)
+        const overlap = chapterMatchRate(parsed.meta, otherMeta)
+        const sameTitle =
+          Boolean(entry.normalizedTitle) && entry.normalizedTitle === other.normalizedTitle
+        if (sameTitle || overlap >= 0.05) {
+          suspects.push({ id: other.id, title: other.title, overlap })
+        }
+      } catch {
+        // A damaged entry must not abort an import that already succeeded.
       }
     }
 

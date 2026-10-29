@@ -85,6 +85,27 @@ describe('ImportService', () => {
     expect((await library.list())).toHaveLength(2)
   })
 
+  it('does not fail an import when another book entry is damaged', async () => {
+    const library = new LibraryRepository(root)
+    const books = new BookRepository(root)
+    const service = new ImportService(library, books)
+
+    const damaged = join(root, '损坏.txt')
+    await writeFile(damaged, iconv.encode(makeBookText(1, 3), 'utf8'))
+    const first = await service.importFile(damaged)
+    if ('duplicate' in first) throw new Error('unexpected duplicate')
+
+    await rm(join(root, 'books', first.entry.id), { recursive: true, force: true })
+
+    const file = join(root, '新书.txt')
+    await writeFile(file, iconv.encode(makeBookText(10, 12), 'utf8'))
+    const outcome = await service.importFile(file)
+    if ('duplicate' in outcome) throw new Error('unexpected duplicate')
+
+    expect(outcome.entry.chapterCount).toBe(3)
+    expect(await library.list()).toHaveLength(2)
+  })
+
   it('propagates parse errors without touching the library', async () => {
     const library = new LibraryRepository(root)
     const books = new BookRepository(root)
