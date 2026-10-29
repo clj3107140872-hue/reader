@@ -1,4 +1,5 @@
 import iconv from 'iconv-lite'
+import { COMMON_HANZI } from './encoding'
 
 export interface RepairResult {
   text: string
@@ -6,61 +7,78 @@ export interface RepairResult {
   warnings: string[]
 }
 
-function mojibakeScore(text: string): number {
-  if (!text) return 0
-  let latin = 0
-  let burned = 0
+const BURNED_PATTERN = /锟斤拷|�/
+const BURNED_GLOBAL = /锟斤拷|�/g
+const WHITESPACE = /\s/u
+const DETECT_LATIN_RATIO = 0.25
+const UNRECOVERABLE_WARNING = '部分乱码内容无法恢复，已清除'
+const UNREPAIRED_WARNING = '检测到疑似乱码，但无法可靠还原，已保留原文'
+
+function commonHanRatio(text: string): number {
+  let han = 0
   let total = 0
   for (const ch of text) {
-    const c = ch.codePointAt(0)!
-    if (c === 10 || c === 13 || c === 32) continue
+    if (WHITESPACE.test(ch)) continue
     total++
-    if (c >= 0x00a0 && c <= 0x00ff) latin++
-    if (ch === '锟' || c === 0xfffd) burned++
+    if (COMMON_HANZI.includes(ch)) han++
   }
-  if (total === 0) return 0
-  return (latin + burned * 3) / total
+  return total === 0 ? 0 : han / total
+}
+
+function highLatinRatio(text: string): number {
+  let latin = 0
+  let total = 0
+  for (const ch of text) {
+    if (WHITESPACE.test(ch)) continue
+    total++
+    const c = ch.codePointAt(0)!
+    if (c >= 0x00c0 && c <= 0x00ff) latin++
+  }
+  return total === 0 ? 0 : latin / total
+}
+
+function stripBurned(text: string, warnings: string[]): string {
+  if (!BURNED_PATTERN.test(text)) return text
+  const cleaned = text.replace(BURNED_GLOBAL, '')
+  if (cleaned !== text && !warnings.includes(UNRECOVERABLE_WARNING)) {
+    warnings.push(UNRECOVERABLE_WARNING)
+  }
+  return cleaned
 }
 
 export function repairMojibake(text: string, encoding: string): RepairResult {
   const warnings: string[] = []
   if (!text) return { text, repaired: false, warnings }
 
-  const hadBurned = /[\uFFFD锟]/.test(text)
-  let working = text
-  if (hadBurned) {
-    working = working.replace(/锟斤拷/g, '').replace(/[锟\uFFFD]+/g, '')
-    warnings.push('部分乱码内容无法恢复，已清除')
+  let working = stripBurned(text, warnings)
+  const repairedByStrip = working !== text
+
+  if (encoding === 'utf16le' || encoding === 'utf16be') {
+    return { text: working, repaired: repairedByStrip, warnings }
   }
 
-  const before = mojibakeScore(working)
-  if (before < 0.05) {
-    return { text: working, repaired: hadBurned, warnings }
+  if (highLatinRatio(working) < DETECT_LATIN_RATIO) {
+    return { text: working, repaired: repairedByStrip, warnings }
   }
 
-  const candidates: string[] = []
-  if (/[\u00a0-\u00ff]/.test(text) && encoding !== 'utf16le' && encoding !== 'utf16be') {
-    const latin = Buffer.from(working, 'latin1')
-    candidates.push(iconv.decode(latin, 'utf8'))
-    candidates.push(iconv.decode(latin, 'gb18030'))
-  }
-
+  const bytes = Buffer.from(working, 'latin1')
+  const beforeHan = commonHanRatio(working)
   let bestText = working
-  let bestScore = before
-  for (const candidate of candidates) {
-    const score = mojibakeScore(candidate)
-    if (score < bestScore) {
-      bestScore = score
+  let bestHan = beforeHan
+  for (const name of ['utf8', 'gb18030'] as const) {
+    const candidate = iconv.decode(bytes, name)
+    if (candidate.includes('�')) continue
+    const han = commonHanRatio(candidate)
+    if (han > bestHan) {
       bestText = candidate
+      bestHan = han
     }
   }
 
-  if (bestText === working) return { text: working, repaired: hadBurned, warnings }
-
-  if (/[\uFFFD锟斤拷]/.test(bestText)) {
-    bestText = bestText.replace(/\uFFFD+/g, '').replace(/锟斤拷/g, '')
-    warnings.push('部分乱码内容无法恢复，已清除')
+  if (bestText === working) {
+    if (!warnings.includes(UNREPAIRED_WARNING)) warnings.push(UNREPAIRED_WARNING)
+    return { text: working, repaired: repairedByStrip, warnings }
   }
 
-  return { text: bestText, repaired: true, warnings }
+  return { text: stripBurned(bestText, warnings), repaired: true, warnings }
 }
