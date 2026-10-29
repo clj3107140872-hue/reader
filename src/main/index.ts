@@ -44,13 +44,14 @@ app.whenReady().then(() => {
       : await dialog.showOpenDialog(options)
 
     if (selection.canceled || selection.filePaths.length === 0) {
-      return { imported: 0, duplicates: [], suspects: [], errors: [] }
+      return { imported: 0, duplicates: [], suspects: [], errors: [], warnings: [] }
     }
 
     let imported = 0
     const duplicates: string[] = []
     const suspects: { id: string; title: string; overlap: number }[] = []
     const errors: string[] = []
+    const warnings = new Set<string>()
 
     for (const file of selection.filePaths) {
       try {
@@ -61,13 +62,16 @@ app.whenReady().then(() => {
         }
         imported += 1
         suspects.push(...outcome.suspects)
+        for (const warning of outcome.warnings) {
+          warnings.add(`${basename(file)}：${warning}`)
+        }
         win?.webContents.send('import:progress', { fileName: basename(file), stage: 'done' })
       } catch (error) {
         errors.push(`${basename(file)}: ${(error as Error).message}`)
       }
     }
 
-    return { imported, duplicates, suspects, errors }
+    return { imported, duplicates, suspects, errors, warnings: [...warnings] }
   })
 
   createWindow()

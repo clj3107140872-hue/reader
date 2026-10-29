@@ -10,6 +10,7 @@ import type { LibraryRepository } from '../storage/library'
 export interface ImportOutcome {
   entry: LibraryEntry
   suspects: { id: string; title: string; overlap: number }[]
+  warnings: string[]
 }
 
 export interface DuplicateOutcome {
@@ -71,6 +72,6 @@ export class ImportService {
       }
     }
 
-    return { entry, suspects }
+    return { entry, suspects, warnings: parsed.warnings }
   }
 }

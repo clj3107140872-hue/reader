@@ -116,4 +116,21 @@ describe('ImportService', () => {
     await expect(service.importFile(file)).rejects.toThrow('文件没有可阅读的正文')
     expect(await library.list()).toEqual([])
   })
+
+  it('surfaces repair warnings from the parser', async () => {
+    const library = new LibraryRepository(root)
+    const books = new BookRepository(root)
+    const service = new ImportService(library, books)
+
+    const file = join(root, '乱码.txt')
+    const text = makeBookText(1, 3).replace(
+      '这是第1章的正文内容，用来测试导入流程是否稳定。',
+      '正文开始锟斤拷锟斤拷正文继续。'
+    )
+    await writeFile(file, iconv.encode(text, 'utf8'))
+
+    const outcome = await service.importFile(file)
+    if ('duplicate' in outcome) throw new Error('unexpected duplicate')
+    expect(outcome.warnings).toContain('部分乱码内容无法恢复，已清除')
+  })
 })

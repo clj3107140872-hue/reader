@@ -38,6 +38,7 @@ export default function App() {
         )
       }
       if (summary.errors.length > 0) parts.push(`失败：${summary.errors.join('；')}`)
+      if (summary.warnings.length > 0) parts.push(`提示：${summary.warnings.join('；')}`)
       setMessage(parts.length > 0 ? parts.join(' ｜ ') : '没有导入任何文件')
       await refresh()
     } finally {

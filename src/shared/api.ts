@@ -5,6 +5,7 @@ export interface ImportSummary {
   duplicates: string[]
   suspects: { id: string; title: string; overlap: number }[]
   errors: string[]
+  warnings: string[]
 }
 
 export interface ReaderApi {
