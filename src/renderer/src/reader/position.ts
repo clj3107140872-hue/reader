@@ -50,8 +50,15 @@ export function chapterIndexForPercent(meta: BookMeta, percent: number): number 
 }
 
 export function resolveChapterIndex(meta: BookMeta, chapterKey: string, fallback: number): number {
-  const found = meta.chapters.findIndex((chapter) => chapter.titleHash === chapterKey)
-  const index = found >= 0 ? found : fallback
   if (meta.chapters.length === 0) return 0
-  return Math.min(Math.max(index, 0), meta.chapters.length - 1)
+  const matches: number[] = []
+  meta.chapters.forEach((chapter, index) => {
+    if (chapter.titleHash === chapterKey) matches.push(index)
+  })
+  if (matches.length > 0) {
+    return matches.reduce((best, index) =>
+      Math.abs(index - fallback) < Math.abs(best - fallback) ? index : best
+    )
+  }
+  return Math.min(Math.max(fallback, 0), meta.chapters.length - 1)
 }

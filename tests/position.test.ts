@@ -54,4 +54,18 @@ describe('reader position', () => {
     expect(resolveChapterIndex(meta(), 'missing', 99)).toBe(1)
     expect(resolveChapterIndex(meta(), 'missing', -5)).toBe(0)
   })
+
+  it('picks the matching chapter closest to the saved index when titles repeat', () => {
+    const repeated: BookMeta = {
+      ...meta(),
+      chapters: [
+        { ...meta().chapters[0], titleHash: 'same' },
+        { ...meta().chapters[1], titleHash: 'same' },
+        { ...meta().chapters[1], index: 2, titleHash: 'h3' }
+      ]
+    }
+    expect(resolveChapterIndex(repeated, 'same', 0)).toBe(0)
+    expect(resolveChapterIndex(repeated, 'same', 1)).toBe(1)
+    expect(resolveChapterIndex(repeated, 'same', 2)).toBe(1)
+  })
 })
