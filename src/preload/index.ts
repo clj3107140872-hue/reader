@@ -5,6 +5,7 @@ const api: ReaderApi = {
   ping: () => ipcRenderer.invoke('app:ping'),
   libraryList: () => ipcRenderer.invoke('library:list'),
   chooseAndImport: () => ipcRenderer.invoke('library:choose-import'),
+  debugImport: (paths) => ipcRenderer.invoke('debug:import', paths),
   onImportProgress: (callback) => {
     const listener = (_event: unknown, payload: { fileName: string; stage: string }): void => {
       callback(payload)

@@ -1,15 +1,50 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import type { OpenDialogOptions } from 'electron'
 import { basename, join } from 'node:path'
+import type { ImportSummary } from '../shared/api'
 import { ImportService } from './services/import'
 import { resolveDataDir } from './services/paths'
 import { BookRepository } from './storage/book'
 import { LibraryRepository } from './storage/library'
 
+// Development only: expose the Chrome DevTools Protocol so automated checks
+// can drive the window. Packaged builds never enable it.
+if (!app.isPackaged) {
+  app.commandLine.appendSwitch('remote-debugging-port', '9222')
+}
+
 const dataDir = resolveDataDir()
 const library = new LibraryRepository(dataDir)
 const books = new BookRepository(dataDir)
 const importer = new ImportService(library, books)
+
+async function importFiles(files: string[], win: BrowserWindow | null): Promise<ImportSummary> {
+  let imported = 0
+  const duplicates: string[] = []
+  const suspects: { id: string; title: string; overlap: number }[] = []
+  const errors: string[] = []
+  const warnings = new Set<string>()
+
+  for (const file of files) {
+    try {
+      const outcome = await importer.importFile(file)
+      if ('duplicate' in outcome) {
+        duplicates.push(outcome.title)
+        continue
+      }
+      imported += 1
+      suspects.push(...outcome.suspects)
+      for (const warning of outcome.warnings) {
+        warnings.add(`${basename(file)}：${warning}`)
+      }
+      win?.webContents.send('import:progress', { fileName: basename(file), stage: 'done' })
+    } catch (error) {
+      errors.push(`${basename(file)}: ${(error as Error).message}`)
+    }
+  }
+
+  return { imported, duplicates, suspects, errors, warnings: [...warnings] }
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -47,32 +82,17 @@ app.whenReady().then(() => {
       return { imported: 0, duplicates: [], suspects: [], errors: [], warnings: [] }
     }
 
-    let imported = 0
-    const duplicates: string[] = []
-    const suspects: { id: string; title: string; overlap: number }[] = []
-    const errors: string[] = []
-    const warnings = new Set<string>()
-
-    for (const file of selection.filePaths) {
-      try {
-        const outcome = await importer.importFile(file)
-        if ('duplicate' in outcome) {
-          duplicates.push(outcome.title)
-          continue
-        }
-        imported += 1
-        suspects.push(...outcome.suspects)
-        for (const warning of outcome.warnings) {
-          warnings.add(`${basename(file)}：${warning}`)
-        }
-        win?.webContents.send('import:progress', { fileName: basename(file), stage: 'done' })
-      } catch (error) {
-        errors.push(`${basename(file)}: ${(error as Error).message}`)
-      }
-    }
-
-    return { imported, duplicates, suspects, errors, warnings: [...warnings] }
+    return importFiles(selection.filePaths, win)
   })
+
+  // Development only: lets automation import files without driving the native
+  // dialog. Packaged builds do not register this handler.
+  if (!app.isPackaged) {
+    ipcMain.handle('debug:import', (_event, paths: string[]) => {
+      const safePaths = Array.isArray(paths) ? paths.filter((path) => typeof path === 'string') : []
+      return importFiles(safePaths, BrowserWindow.getFocusedWindow())
+    })
+  }
 
   createWindow()
 })

@@ -12,5 +12,7 @@ export interface ReaderApi {
   ping(): Promise<string>
   libraryList(): Promise<LibraryEntry[]>
   chooseAndImport(): Promise<ImportSummary>
+  /** Development builds only; rejects in packaged builds. */
+  debugImport(paths: string[]): Promise<ImportSummary>
   onImportProgress(cb: (payload: { fileName: string; stage: string }) => void): () => void
 }
