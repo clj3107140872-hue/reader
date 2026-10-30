@@ -71,3 +71,22 @@ export interface AdRule {
   pattern: string
   enabled: boolean
 }
+
+export type ThemeName = 'light' | 'dark' | 'green' | 'sepia'
+
+export interface TypographySettings {
+  fontFamily: string
+  fontSize: number
+  lineHeight: number
+  paragraphSpacing: number
+  pagePadding: number
+  maxContentWidth: number | null
+}
+
+export interface AppSettings {
+  version: 1
+  theme: ThemeName
+  typography: TypographySettings
+  cleaning: { enabled: boolean; enableUserRules: boolean }
+  window: { width: number; height: number; x?: number; y?: number; maximized: boolean }
+}

@@ -1,4 +1,5 @@
-import type { LibraryEntry } from '../core/model'
+import type { AppSettings, BookMeta, Bookmark, BookProgress, LibraryEntry } from '../core/model'
+import type { SettingsPatch } from './settings'
 
 export interface ImportSummary {
   imported: number
@@ -8,6 +9,20 @@ export interface ImportSummary {
   warnings: string[]
 }
 
+export interface OpenBookPayload {
+  meta: BookMeta
+  chapters: string[]
+  progress: BookProgress | null
+  bookmarks: Bookmark[]
+}
+
+export interface NewBookmark {
+  chapterKey: string
+  chapterIndex: number
+  paragraphIndex: number
+  excerpt: string
+}
+
 export interface ReaderApi {
   ping(): Promise<string>
   libraryList(): Promise<LibraryEntry[]>
@@ -15,4 +30,7 @@ export interface ReaderApi {
   /** Development builds only; rejects in packaged builds. */
   debugImport(paths: string[]): Promise<ImportSummary>
   onImportProgress(cb: (payload: { fileName: string; stage: string }) => void): () => void
+  getSettings(): Promise<AppSettings>
+  updateSettings(patch: SettingsPatch): Promise<AppSettings>
+  toggleFullscreen(): Promise<boolean>
 }

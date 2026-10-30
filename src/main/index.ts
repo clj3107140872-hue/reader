@@ -1,11 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import type { OpenDialogOptions } from 'electron'
 import { basename, join } from 'node:path'
+import type { AppSettings } from '../core/model'
 import type { ImportSummary } from '../shared/api'
+import type { SettingsPatch } from '../shared/settings'
 import { ImportService } from './services/import'
 import { resolveDataDir } from './services/paths'
 import { BookRepository } from './storage/book'
 import { LibraryRepository } from './storage/library'
+import { SettingsRepository } from './storage/settings'
 
 // Development only: expose the Chrome DevTools Protocol so automated checks
 // can drive the window. Packaged builds never enable it.
@@ -17,6 +20,7 @@ const dataDir = resolveDataDir()
 const library = new LibraryRepository(dataDir)
 const books = new BookRepository(dataDir)
 const importer = new ImportService(library, books)
+const settingsRepo = new SettingsRepository(dataDir)
 
 async function importFiles(files: string[], win: BrowserWindow | null): Promise<ImportSummary> {
   let imported = 0
@@ -46,10 +50,12 @@ async function importFiles(files: string[], win: BrowserWindow | null): Promise<
   return { imported, duplicates, suspects, errors, warnings: [...warnings] }
 }
 
-function createWindow(): void {
+function createWindow(windowState: AppSettings['window']): void {
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: windowState.width,
+    height: windowState.height,
+    x: windowState.x,
+    y: windowState.y,
     minWidth: 800,
     minHeight: 600,
     webPreferences: {
@@ -58,6 +64,11 @@ function createWindow(): void {
       nodeIntegration: false
     }
   })
+  if (windowState.maximized) win.maximize()
+  win.on('close', () => {
+    const bounds = win.getNormalBounds()
+    void settingsRepo.update({ window: { ...bounds, maximized: win.isMaximized() } })
+  })
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
@@ -65,8 +76,19 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  const settings = await settingsRepo.read()
+
   ipcMain.handle('app:ping', () => 'pong')
+  ipcMain.handle('settings:get', () => settingsRepo.read())
+  ipcMain.handle('settings:update', (_event, patch: SettingsPatch) => settingsRepo.update(patch))
+  ipcMain.handle('window:toggle-fullscreen', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return false
+    const next = !win.isFullScreen()
+    win.setFullScreen(next)
+    return next
+  })
   ipcMain.handle('library:list', () => library.list())
   ipcMain.handle('library:choose-import', async () => {
     const win = BrowserWindow.getFocusedWindow()
@@ -94,7 +116,7 @@ app.whenReady().then(() => {
     })
   }
 
-  createWindow()
+  createWindow(settings.window)
 })
 
 app.on('window-all-closed', () => {
@@ -102,5 +124,5 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  if (BrowserWindow.getAllWindows().length === 0) void settingsRepo.read().then((s) => createWindow(s.window))
 })

@@ -14,7 +14,10 @@ const api: ReaderApi = {
     return () => {
       ipcRenderer.removeListener('import:progress', listener)
     }
-  }
+  },
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
+  toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen')
 }
 
 contextBridge.exposeInMainWorld('api', api)
