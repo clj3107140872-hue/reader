@@ -1,3 +1,4 @@
+import { isChapterTitleLine } from './chapters'
 import type { BookMeta, CleanedChapter } from './model'
 import { buildChapterMetas } from './pipeline'
 
@@ -37,11 +38,16 @@ export function buildBookDocuments(input: BookDocumentsInput): BookDocuments {
   }
 }
 
+/** Synthetic titles like 正文 were never a line in the original source. */
+export function hasTitleLine(chapter: CleanedChapter): boolean {
+  return isChapterTitleLine(chapter.title) !== null
+}
+
 function assignLines(chapters: CleanedChapter[]): CleanedChapter[] {
   let line = 0
   return chapters.map((chapter) => {
     const startLine = line
-    line += 1
+    if (hasTitleLine(chapter)) line += 1
     for (const paragraph of chapter.paragraphs) {
       line += 2
     }
@@ -52,7 +58,7 @@ function assignLines(chapters: CleanedChapter[]): CleanedChapter[] {
 function serializeChapters(chapters: CleanedChapter[]): string {
   const lines: string[] = []
   for (const chapter of chapters) {
-    lines.push(chapter.title)
+    if (hasTitleLine(chapter)) lines.push(chapter.title)
     for (const paragraph of chapter.paragraphs) {
       lines.push(paragraph, '')
     }

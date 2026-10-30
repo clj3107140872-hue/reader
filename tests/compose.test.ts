@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { splitChapters } from '../src/core/chapters'
 import { buildBookDocuments } from '../src/core/compose'
+import { chaptersFromLines } from '../src/core/reprocess'
 
 describe('buildBookDocuments', () => {
   it('rebuilds source text and line numbers from merged chapters', () => {
@@ -39,6 +40,24 @@ describe('buildBookDocuments', () => {
       ['第二章', ['第三段。']],
       ['第三章', ['第四段。']]
     ])
+  })
+
+  it('omits a synthetic 正文 title line and recleans to the original paragraphs', () => {
+    const documents = buildBookDocuments({
+      id: 'book-1',
+      title: '测试书',
+      encoding: 'utf8',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      chapters: [
+        { title: '正文', level: 'chapter', startLine: 0, paragraphs: ['开头。', '第二段。'] }
+      ]
+    })
+
+    expect(documents.chapters[0].startLine).toBe(0)
+    expect(documents.sourceText.split('\n').filter(Boolean)).toEqual(['开头。', '第二段。'])
+    expect(
+      chaptersFromLines(documents.sourceText, documents.meta).map((chapter) => chapter.paragraphs)
+    ).toEqual([['开头。', '第二段。']])
   })
 
   it('keeps an existing source and its chapter line numbers', () => {
