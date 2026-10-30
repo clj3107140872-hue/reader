@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { LibraryEntry } from '../../../core/model'
+import type { ImportSummary, ImportSuspect } from '../../../shared/api'
 import BookCard from '../components/BookCard'
 import Modal from '../components/Modal'
 
@@ -41,6 +42,8 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   const [menu, setMenu] = useState<{ entry: LibraryEntry; x: number; y: number } | null>(null)
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
+  const [mergeQueue, setMergeQueue] = useState<ImportSuspect[]>([])
+  const busyRef = useRef(false)
 
   const notify = (text: string): void => setToast({ id: Date.now(), text })
 
@@ -70,32 +73,57 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     return () => window.removeEventListener('keydown', handleKey)
   }, [menu])
 
-  const handleImport = async (): Promise<void> => {
+  const applySummary = async (summary: ImportSummary): Promise<void> => {
+    const parts: string[] = []
+    if (summary.imported > 0) parts.push(`成功导入 ${summary.imported} 本`)
+    if (summary.duplicates.length > 0) parts.push(`已在书库：${summary.duplicates.join('、')}`)
+    if (summary.errors.length > 0) parts.push(`失败：${summary.errors.join('；')}`)
+    if (summary.warnings.length > 0) parts.push(`提示：${summary.warnings.join('；')}`)
+    notify(parts.length > 0 ? parts.join(' ｜ ') : '没有导入任何文件')
+    if (summary.suspects.length > 0) setMergeQueue(summary.suspects)
+    await refresh()
+  }
+
+  const runImport = async (task: () => Promise<ImportSummary>): Promise<void> => {
+    if (busyRef.current) return
+    busyRef.current = true
     setBusy(true)
     setProgress('')
     try {
-      const summary = await window.api.chooseAndImport()
-      const parts: string[] = []
-      if (summary.imported > 0) parts.push(`成功导入 ${summary.imported} 本`)
-      if (summary.duplicates.length > 0) parts.push(`已在书库：${summary.duplicates.join('、')}`)
-      if (summary.suspects.length > 0) {
-        parts.push(
-          `疑似同一本书（暂未合并）：${summary.suspects
-            .map((item) => `${item.title}，内容重叠 ${(item.overlap * 100).toFixed(0)}%`)
-            .join('；')}`
-        )
-      }
-      if (summary.errors.length > 0) parts.push(`失败：${summary.errors.join('；')}`)
-      if (summary.warnings.length > 0) parts.push(`提示：${summary.warnings.join('；')}`)
-      notify(parts.length > 0 ? parts.join(' ｜ ') : '没有导入任何文件')
-      await refresh()
+      await applySummary(await task())
     } catch (reason) {
       notify(`导入失败：${errorText(reason)}`)
     } finally {
+      busyRef.current = false
       setBusy(false)
       setProgress('')
     }
   }
+
+  const handleImport = (): Promise<void> => runImport(() => window.api.chooseAndImport())
+
+  const pendingMerge = mergeQueue[0] ?? null
+
+  const confirmMerge = async (): Promise<void> => {
+    if (!pendingMerge) return
+    setActionBusy(true)
+    try {
+      const result = await window.api.mergeBooks(pendingMerge.id, pendingMerge.sourceId)
+      setMergeQueue((queue) => queue.filter((item) => item.sourceId !== pendingMerge.sourceId))
+      notify(
+        `已合并为《${result.title}》，共 ${result.chapterCount} 章${
+          result.warning ? `；${result.warning}` : ''
+        }`
+      )
+      await refresh()
+    } catch (reason) {
+      notify(`合并失败：${errorText(reason)}`)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const skipMerge = (): void => setMergeQueue((queue) => queue.slice(1))
 
   const confirmDelete = async (entry: LibraryEntry): Promise<void> => {
     setActionBusy(true)
@@ -179,6 +207,33 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
             </button>
           </div>
         </>
+      )}
+
+      {pendingMerge && (
+        <Modal
+          title="可能是同一本书"
+          onClose={skipMerge}
+          footer={
+            <>
+              <button className="modal-button ghost" onClick={skipMerge}>
+                先不合并
+              </button>
+              <button
+                className="modal-button"
+                disabled={actionBusy}
+                onClick={() => void confirmMerge()}
+              >
+                {actionBusy ? '合并中…' : `合并到《${pendingMerge.title}》`}
+              </button>
+            </>
+          }
+        >
+          <p>
+            《{pendingMerge.sourceTitle}》与《{pendingMerge.title}》有{' '}
+            {(pendingMerge.overlap * 100).toFixed(0)}% 的章节内容重叠，可能是一本书的不同分卷。
+          </p>
+          <p className="modal-note">合并后会保留阅读进度和书签，并自动备份原书数据。</p>
+        </Modal>
       )}
 
       {dialog?.kind === 'source' && (

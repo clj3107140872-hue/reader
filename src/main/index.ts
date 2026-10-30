@@ -1,10 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
 import type { OpenDialogOptions } from 'electron'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import type { AppSettings, BookProgress } from '../core/model'
-import type { ImportSummary, NewBookmark } from '../shared/api'
+import type { NewBookmark } from '../shared/api'
 import type { SettingsPatch } from '../shared/settings'
 import { ImportService } from './services/import'
+import { ImportQueue } from './services/importQueue'
 import { LibraryService } from './services/library'
 import { MergeService } from './services/merge'
 import { resolveDataDir } from './services/paths'
@@ -34,34 +35,7 @@ const reader = new ReaderService(library, books)
 const search = new SearchService(books)
 const merger = new MergeService(library, books)
 const libraryService = new LibraryService(library, books)
-
-async function importFiles(files: string[], win: BrowserWindow | null): Promise<ImportSummary> {
-  let imported = 0
-  const duplicates: string[] = []
-  const suspects: { id: string; title: string; overlap: number }[] = []
-  const errors: string[] = []
-  const warnings = new Set<string>()
-
-  for (const file of files) {
-    try {
-      const outcome = await importer.importFile(file)
-      if ('duplicate' in outcome) {
-        duplicates.push(outcome.title)
-        continue
-      }
-      imported += 1
-      suspects.push(...outcome.suspects)
-      for (const warning of outcome.warnings) {
-        warnings.add(`${basename(file)}：${warning}`)
-      }
-      win?.webContents.send('import:progress', { fileName: basename(file), stage: 'done' })
-    } catch (error) {
-      errors.push(`${basename(file)}: ${(error as Error).message}`)
-    }
-  }
-
-  return { imported, duplicates, suspects, errors, warnings: [...warnings] }
-}
+const importQueue = new ImportQueue(importer)
 
 function createWindow(windowState: AppSettings['window']): void {
   const win = new BrowserWindow({
@@ -134,7 +108,7 @@ app.whenReady().then(async () => {
       return { imported: 0, duplicates: [], suspects: [], errors: [], warnings: [] }
     }
 
-    return importFiles(selection.filePaths, win)
+    return importQueue.importFiles(selection.filePaths)
   })
   ipcMain.handle('book:open', (_event, id: string) => reader.open(id))
   ipcMain.handle('progress:save', (_event, id: string, progress: BookProgress) =>
@@ -165,7 +139,7 @@ app.whenReady().then(async () => {
   if (!app.isPackaged) {
     ipcMain.handle('debug:import', (_event, paths: string[]) => {
       const safePaths = Array.isArray(paths) ? paths.filter((path) => typeof path === 'string') : []
-      return importFiles(safePaths, BrowserWindow.getFocusedWindow())
+      return importQueue.importFiles(safePaths)
     })
   }
 

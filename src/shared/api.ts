@@ -1,10 +1,18 @@
 import type { AppSettings, BookMeta, Bookmark, BookProgress, LibraryEntry } from '../core/model'
 import type { SettingsPatch } from './settings'
 
+export interface ImportSuspect {
+  sourceId: string
+  sourceTitle: string
+  id: string
+  title: string
+  overlap: number
+}
+
 export interface ImportSummary {
   imported: number
   duplicates: string[]
-  suspects: { id: string; title: string; overlap: number }[]
+  suspects: ImportSuspect[]
   errors: string[]
   warnings: string[]
 }
