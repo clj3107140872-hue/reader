@@ -1,4 +1,11 @@
-import type { AppSettings, BookMeta, Bookmark, BookProgress, LibraryEntry } from '../core/model'
+import type {
+  AppSettings,
+  BookMeta,
+  Bookmark,
+  BookProgress,
+  ImportStats,
+  LibraryEntry
+} from '../core/model'
 import type { SettingsPatch } from './settings'
 
 export interface ImportSuspect {
@@ -22,6 +29,13 @@ export interface MergeResult {
   title: string
   chapterCount: number
   removedId: string
+  warning?: string
+}
+
+export interface ReprocessResult {
+  id: string
+  chapterCount: number
+  stats: ImportStats
   warning?: string
 }
 
@@ -72,6 +86,8 @@ export interface ReaderApi {
   addBookmark(id: string, bookmark: NewBookmark): Promise<Bookmark[]>
   removeBookmark(id: string, bookmarkId: string): Promise<Bookmark[]>
   mergeBooks(targetId: string, sourceId: string): Promise<MergeResult>
+  recleanBook(id: string): Promise<ReprocessResult>
+  resplitBook(id: string): Promise<ReprocessResult>
   searchBook(id: string, query: string, token: string): Promise<SearchResults>
   cancelSearch(token: string): Promise<void>
   onSearchProgress(cb: (payload: SearchProgress) => void): () => void

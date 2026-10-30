@@ -10,6 +10,7 @@ import { LibraryService } from './services/library'
 import { MergeService } from './services/merge'
 import { resolveDataDir } from './services/paths'
 import { ReaderService } from './services/reader'
+import { ReprocessService } from './services/reprocess'
 import { SearchService } from './services/search'
 import { BookRepository } from './storage/book'
 import { LibraryRepository } from './storage/library'
@@ -35,6 +36,7 @@ const reader = new ReaderService(library, books)
 const search = new SearchService(books)
 const merger = new MergeService(library, books)
 const libraryService = new LibraryService(library, books)
+const reprocess = new ReprocessService(library, books)
 const importQueue = new ImportQueue(importer)
 
 function createWindow(windowState: AppSettings['window']): void {
@@ -124,6 +126,8 @@ app.whenReady().then(async () => {
     merger.merge(targetId, sourceId)
   )
   ipcMain.handle('library:remove', (_event, id: string) => libraryService.remove(id))
+  ipcMain.handle('book:reclean', (_event, id: string) => reprocess.reclean(id))
+  ipcMain.handle('book:resplit', (_event, id: string) => reprocess.resplit(id))
   ipcMain.handle('book:search', (event, id: string, query: string, token: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     return search.search(id, query, token, (payload) => {
