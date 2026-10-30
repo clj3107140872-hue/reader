@@ -25,6 +25,33 @@ function meta(): BookMeta {
   }
 }
 
+async function writeMatchBook(count: number): Promise<void> {
+  const paragraphs = Array.from({ length: count }, (_, index) => `第${index}段 关键词命中`)
+  await books.writeBook({
+    meta: {
+      version: 1,
+      id: 'm',
+      title: '命中测试',
+      encoding: 'utf8',
+      chapters: [
+        {
+          index: 0,
+          title: '正文',
+          level: 'chapter',
+          titleHash: 'hm',
+          startLine: 0,
+          charCount: paragraphs.join('').length,
+          simhash: 'm',
+          flags: {}
+        }
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z'
+    },
+    sourceText: '原文',
+    chapters: [{ title: '正文', level: 'chapter', startLine: 0, paragraphs }]
+  })
+}
+
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'reader-search-'))
   books = new BookRepository(root)
@@ -67,5 +94,19 @@ describe('SearchService', () => {
     const result = await service.search('b', '正文', 't3', () => undefined)
     expect(result.cancelled).toBe(true)
     expect(result.hits).toEqual([])
+  })
+
+  it('does not report truncation when exactly 300 matches exist', async () => {
+    await writeMatchBook(300)
+    const exact = await service.search('m', '关键词', 't4', () => undefined)
+    expect(exact.hits).toHaveLength(300)
+    expect(exact.truncated).toBe(false)
+  })
+
+  it('reports truncation when a 301st match exists', async () => {
+    await writeMatchBook(301)
+    const capped = await service.search('m', '关键词', 't5', () => undefined)
+    expect(capped.hits).toHaveLength(300)
+    expect(capped.truncated).toBe(true)
   })
 })

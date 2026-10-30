@@ -17,11 +17,18 @@ export default function SearchPanel({ bookId, chapters, onJump, onClose }: Searc
   const [searching, setSearching] = useState(false)
   const [message, setMessage] = useState('')
   const tokenRef = useRef('')
+  const inFlightRef = useRef(false)
 
   useEffect(() => {
     return window.api.onSearchProgress((payload) => {
       if (payload.token === tokenRef.current) setProgress(payload)
     })
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (inFlightRef.current) void window.api.cancelSearch(tokenRef.current)
+    }
   }, [])
 
   const run = async (event: FormEvent): Promise<void> => {
@@ -30,6 +37,7 @@ export default function SearchPanel({ bookId, chapters, onJump, onClose }: Searc
     if (!text || searching) return
     const token = crypto.randomUUID()
     tokenRef.current = token
+    inFlightRef.current = true
     setSearching(true)
     setHits([])
     setMessage('')
@@ -46,7 +54,10 @@ export default function SearchPanel({ bookId, chapters, onJump, onClose }: Searc
         setMessage(reason instanceof Error ? reason.message : String(reason))
       }
     } finally {
-      if (tokenRef.current === token) setSearching(false)
+      if (tokenRef.current === token) {
+        inFlightRef.current = false
+        setSearching(false)
+      }
     }
   }
 

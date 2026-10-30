@@ -40,6 +40,10 @@ export class SearchService {
         const paragraph = paragraphs[paragraphIndex]
         const at = paragraph.toLowerCase().indexOf(needle)
         if (at < 0) continue
+        // Truncated means a 301st match exists; keep scanning until one is found.
+        if (hits.length >= MAX_HITS) {
+          return { token, hits, truncated: true, cancelled: false }
+        }
 
         const start = Math.max(0, at - 20)
         const end = Math.min(paragraph.length, at + needle.length + 40)
@@ -49,10 +53,6 @@ export class SearchService {
           paragraphIndex,
           excerpt: `${start > 0 ? '…' : ''}${paragraph.slice(start, end)}${end < paragraph.length ? '…' : ''}`
         })
-
-        if (hits.length >= MAX_HITS) {
-          return { token, hits, truncated: true, cancelled: false }
-        }
       }
 
       if ((index + 1) % 10 === 0 || index === meta.chapters.length - 1) {

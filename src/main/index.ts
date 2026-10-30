@@ -145,7 +145,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('book:search', (event, id: string, query: string, token: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     return search.search(id, query, token, (payload) => {
-      win?.webContents.send('search:progress', payload)
+      if (win && !win.isDestroyed()) win.webContents.send('search:progress', payload)
     })
   })
   ipcMain.handle('search:cancel', (_event, token: string) => {
