@@ -4,6 +4,7 @@ import type { ReaderApi, SearchProgress } from '../shared/api'
 const api: ReaderApi = {
   ping: () => ipcRenderer.invoke('app:ping'),
   libraryList: () => ipcRenderer.invoke('library:list'),
+  removeBook: (id) => ipcRenderer.invoke('library:remove', id),
   chooseAndImport: () => ipcRenderer.invoke('library:choose-import'),
   debugImport: (paths) => ipcRenderer.invoke('debug:import', paths),
   onImportProgress: (callback) => {

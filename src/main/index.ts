@@ -5,6 +5,7 @@ import type { AppSettings, BookProgress } from '../core/model'
 import type { ImportSummary, NewBookmark } from '../shared/api'
 import type { SettingsPatch } from '../shared/settings'
 import { ImportService } from './services/import'
+import { LibraryService } from './services/library'
 import { MergeService } from './services/merge'
 import { resolveDataDir } from './services/paths'
 import { ReaderService } from './services/reader'
@@ -32,6 +33,7 @@ const settingsRepo = new SettingsRepository(dataDir)
 const reader = new ReaderService(library, books)
 const search = new SearchService(books)
 const merger = new MergeService(library, books)
+const libraryService = new LibraryService(library, books)
 
 async function importFiles(files: string[], win: BrowserWindow | null): Promise<ImportSummary> {
   let imported = 0
@@ -147,6 +149,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('import:resolve', (_event, targetId: string, sourceId: string) =>
     merger.merge(targetId, sourceId)
   )
+  ipcMain.handle('library:remove', (_event, id: string) => libraryService.remove(id))
   ipcMain.handle('book:search', (event, id: string, query: string, token: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     return search.search(id, query, token, (payload) => {

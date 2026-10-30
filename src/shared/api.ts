@@ -54,6 +54,7 @@ export interface SearchResults {
 export interface ReaderApi {
   ping(): Promise<string>
   libraryList(): Promise<LibraryEntry[]>
+  removeBook(id: string): Promise<void>
   chooseAndImport(): Promise<ImportSummary>
   /** Development builds only; rejects in packaged builds. */
   debugImport(paths: string[]): Promise<ImportSummary>
