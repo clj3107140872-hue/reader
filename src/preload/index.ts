@@ -19,6 +19,7 @@ const api: ReaderApi = {
   saveProgress: (id, progress) => ipcRenderer.invoke('progress:save', id, progress),
   addBookmark: (id, bookmark) => ipcRenderer.invoke('bookmark:add', id, bookmark),
   removeBookmark: (id, bookmarkId) => ipcRenderer.invoke('bookmark:remove', id, bookmarkId),
+  mergeBooks: (targetId, sourceId) => ipcRenderer.invoke('import:resolve', targetId, sourceId),
   searchBook: (id, query, token) => ipcRenderer.invoke('book:search', id, query, token),
   cancelSearch: (token) => ipcRenderer.invoke('search:cancel', token),
   onSearchProgress: (callback) => {

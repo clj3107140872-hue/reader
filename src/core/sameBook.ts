@@ -55,6 +55,18 @@ export function normalizeBookTitle(fileName: string): string {
   return title.replace(/[\s_\-—]+/g, '').toLowerCase()
 }
 
+/** Strips volume ranges and quality noise for display, keeping case and spaces. */
+export function displayBookTitle(fileName: string): string {
+  let title = toHalfWidth(fileName.replace(/\.txt$/i, ''))
+  for (const pattern of NOISE_PATTERNS) title = title.replace(pattern, '')
+  return (
+    title
+      .replace(/[\s_\-—]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || fileName.replace(/\.txt$/i, '')
+  )
+}
+
 export function chapterMatchRate(base: BookMeta, other: BookMeta): number {
   const eligible = (chapters: ChapterMeta[]): ChapterMeta[] =>
     chapters.filter((chapter) => chapter.level !== 'volume' && chapter.charCount > 0)

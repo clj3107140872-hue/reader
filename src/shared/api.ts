@@ -9,6 +9,14 @@ export interface ImportSummary {
   warnings: string[]
 }
 
+export interface MergeResult {
+  targetId: string
+  title: string
+  chapterCount: number
+  removedId: string
+  warning?: string
+}
+
 export interface OpenBookPayload {
   meta: BookMeta
   chapters: string[]
@@ -54,6 +62,7 @@ export interface ReaderApi {
   saveProgress(id: string, progress: BookProgress): Promise<void>
   addBookmark(id: string, bookmark: NewBookmark): Promise<Bookmark[]>
   removeBookmark(id: string, bookmarkId: string): Promise<Bookmark[]>
+  mergeBooks(targetId: string, sourceId: string): Promise<MergeResult>
   searchBook(id: string, query: string, token: string): Promise<SearchResults>
   cancelSearch(token: string): Promise<void>
   onSearchProgress(cb: (payload: SearchProgress) => void): () => void

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   chapterMatchRate,
+  displayBookTitle,
   normalizeBookTitle,
   planMerge,
   shouldSuspectSameBook
@@ -180,5 +181,12 @@ describe('planMerge', () => {
       '第一章',
       '第二章'
     ])
+  })
+})
+
+describe('displayBookTitle', () => {
+  it('keeps display casing and spaces when stripping volume suffixes', () => {
+    expect(displayBookTitle('Harry Potter 1-3章.txt')).toBe('Harry Potter')
+    expect(displayBookTitle('测试书_1-3章.txt')).toBe('测试书')
   })
 })

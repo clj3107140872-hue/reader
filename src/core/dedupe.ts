@@ -1,4 +1,5 @@
-import { hammingBig, toBig } from './text'
+import type { CleanedChapter } from './model'
+import { hammingBig, normalizeForHash, toBig } from './text'
 
 export interface DedupeItem {
   titleHash: string
@@ -40,4 +41,33 @@ export function markDuplicateChapters(items: DedupeItem[]): boolean[] {
   }
 
   return flags
+}
+
+export interface ParagraphDedupeResult {
+  chapters: CleanedChapter[]
+  removed: number
+}
+
+/**
+ * Removes cross-chapter duplicates of paragraphs longer than 50 characters,
+ * keeping the first copy. Only used when merging two volumes.
+ */
+export function dedupeCrossChapterParagraphs(chapters: CleanedChapter[]): ParagraphDedupeResult {
+  const seen = new Set<string>()
+  let removed = 0
+  const deduped = chapters.map((chapter) => ({
+    ...chapter,
+    paragraphs: chapter.paragraphs.filter((paragraph) => {
+      if (paragraph.length <= 50) return true
+      const key = normalizeForHash(paragraph)
+      if (!key) return true
+      if (seen.has(key)) {
+        removed += 1
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+  }))
+  return { chapters: deduped, removed }
 }
