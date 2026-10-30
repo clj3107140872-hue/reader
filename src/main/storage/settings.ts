@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import type { AppSettings } from '../../core/model'
 import { mergeSettings, normalizeSettings } from '../../shared/settings'
 import type { SettingsPatch } from '../../shared/settings'
-import { atomicWriteJson, readJson } from './fsUtil'
+import { atomicWriteJsonSync, readJsonSync } from './fsUtil'
 
 export class SettingsRepository {
   constructor(private readonly root: string) {}
@@ -12,12 +12,20 @@ export class SettingsRepository {
   }
 
   async read(): Promise<AppSettings> {
-    return normalizeSettings(await readJson<unknown>(this.file))
+    return this.readSync()
+  }
+
+  readSync(): AppSettings {
+    return normalizeSettings(readJsonSync<unknown>(this.file))
   }
 
   async update(patch: SettingsPatch): Promise<AppSettings> {
-    const next = mergeSettings(await this.read(), patch)
-    await atomicWriteJson(this.file, next)
+    return this.updateSync(patch)
+  }
+
+  updateSync(patch: SettingsPatch): AppSettings {
+    const next = mergeSettings(this.readSync(), patch)
+    atomicWriteJsonSync(this.file, next)
     return next
   }
 }

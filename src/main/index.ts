@@ -67,7 +67,7 @@ function createWindow(windowState: AppSettings['window']): void {
   if (windowState.maximized) win.maximize()
   win.on('close', () => {
     const bounds = win.getNormalBounds()
-    void settingsRepo.update({ window: { ...bounds, maximized: win.isMaximized() } })
+    settingsRepo.updateSync({ window: { ...bounds, maximized: win.isMaximized() } })
   })
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -41,5 +42,13 @@ describe('SettingsRepository', () => {
     expect(stored.theme).toBe('dark')
     expect(stored.typography.lineHeight).toBe(2)
     expect(stored.typography.fontSize).toBe(DEFAULT_SETTINGS.typography.fontSize)
+  })
+
+  it('writes updates synchronously so they survive app exit', async () => {
+    const repo = new SettingsRepository(root)
+    await repo.read()
+    repo.updateSync({ window: { width: 1100, height: 750, maximized: false } })
+    const stored = JSON.parse(readFileSync(join(root, 'settings.json'), 'utf8'))
+    expect(stored.window).toMatchObject({ width: 1100, height: 750, maximized: false })
   })
 })
