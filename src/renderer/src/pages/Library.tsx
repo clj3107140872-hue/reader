@@ -231,8 +231,20 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
             <BookCard
               key={entry.id}
               entry={entry}
-              onOpen={() => onOpen(entry.id)}
-              onMenu={(target, x, y) => setMenu({ entry: target, ...clampMenu(x, y) })}
+              onOpen={() => {
+                if (busyRef.current) {
+                  notify('正在导入，请稍候')
+                  return
+                }
+                onOpen(entry.id)
+              }}
+              onMenu={(target, x, y) => {
+                if (busyRef.current) {
+                  notify('正在导入，请稍候')
+                  return
+                }
+                setMenu({ entry: target, ...clampMenu(x, y) })
+              }}
             />
           ))}
         </div>

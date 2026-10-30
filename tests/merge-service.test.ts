@@ -224,6 +224,10 @@ describe('MergeService', () => {
     expect(stored.progress?.chapterIndex).toBe(3)
     expect(stored.bookmarks.find((bookmark) => bookmark.id === 'mark-a')?.chapterIndex).toBe(3)
     expect(stored.bookmarks.find((bookmark) => bookmark.id === 'mark-b')?.chapterIndex).toBe(0)
+
+    const [entry] = await library.list()
+    expect(entry.progressPercent).toBe(50)
+    expect(entry.lastReadAt).toBe('2026-01-02T00:00:00.000Z')
   })
 
   it('deduplicates overlapping chapters from the source', async () => {

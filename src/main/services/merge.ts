@@ -101,6 +101,29 @@ function mergedStats(
   }
 }
 
+/** Coarse shelf percent from the merged position; the reader recomputes it exactly on open. */
+function mergedEntryProgress(
+  target: LibraryEntry,
+  source: LibraryEntry,
+  progress: BookProgress | null,
+  chapterCount: number
+): Pick<LibraryEntry, 'progressPercent' | 'lastReadAt'> {
+  if (!progress) {
+    return { progressPercent: target.progressPercent, lastReadAt: target.lastReadAt }
+  }
+  const percent =
+    chapterCount > 0
+      ? Math.min(100, Math.max(0, Math.round((progress.chapterIndex / chapterCount) * 100)))
+      : 0
+  const times = [target.lastReadAt, source.lastReadAt, progress.updatedAt].filter(
+    (value): value is string => Boolean(value)
+  )
+  return {
+    progressPercent: percent,
+    lastReadAt: times.length > 0 ? times.sort()[times.length - 1] : null
+  }
+}
+
 export class MergeService {
   constructor(
     private readonly library: LibraryRepository,
@@ -159,7 +182,8 @@ export class MergeService {
                 chapterCount: documents.meta.chapters.length,
                 fileHashes: mergedFileHashes(target, source),
                 sourceFileNames: mergedFileNames(target, source),
-                stats: mergedStats(target, source, documents.meta.chapters, merged.removed)
+                stats: mergedStats(target, source, documents.meta.chapters, merged.removed),
+                ...mergedEntryProgress(target, source, progress, documents.meta.chapters.length)
               }
             : entry
         )
