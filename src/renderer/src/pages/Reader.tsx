@@ -221,6 +221,12 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
     return () => flush()
   }, [flush])
 
+  useEffect(() => {
+    const handleBeforeUnload = (): void => flush()
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [flush])
+
   const seek = (percent: number): void => {
     if (!book) return
     const chapterIndex = chapterIndexForPercent(book.meta, percent)
@@ -323,6 +329,112 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
     },
     [bookId]
   )
+
+  const scrollByScreen = useCallback((direction: number): void => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    scroller.scrollBy({ top: direction * scroller.clientHeight * 0.9, behavior: 'smooth' })
+  }, [])
+
+  const changeFontSize = useCallback(
+    (delta: number): void => {
+      const fontSize = Math.min(36, Math.max(12, settings.typography.fontSize + delta))
+      onSettingsChange({ typography: { fontSize } })
+    },
+    [onSettingsChange, settings.typography.fontSize]
+  )
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null
+      const editing =
+        !!target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+
+      if (editing) {
+        if (event.key === 'Escape') {
+          setDrawer(null)
+          target.blur()
+        }
+        return
+      }
+
+      if (event.ctrlKey || event.metaKey) {
+        switch (event.key) {
+          case 'f':
+            event.preventDefault()
+            setDrawer('search')
+            return
+          case 'b':
+            event.preventDefault()
+            if (!event.repeat) toggleBookmark()
+            return
+          case '=':
+          case '+':
+            event.preventDefault()
+            changeFontSize(1)
+            return
+          case '-':
+            event.preventDefault()
+            changeFontSize(-1)
+            return
+          default:
+            return
+        }
+      }
+
+      if (event.key === 'F11') {
+        event.preventDefault()
+        void window.api.toggleFullscreen()
+        return
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        if (drawer) setDrawer(null)
+        else onBack()
+        return
+      }
+
+      if (drawer !== null) return
+
+      switch (event.key) {
+        case 'ArrowLeft':
+          event.preventDefault()
+          jumpToChapter(current.chapterIndex - 1)
+          break
+        case 'ArrowRight':
+          event.preventDefault()
+          jumpToChapter(current.chapterIndex + 1)
+          break
+        case ' ':
+        case 'PageDown':
+          event.preventDefault()
+          scrollByScreen(event.shiftKey ? -1 : 1)
+          break
+        case 'PageUp':
+          event.preventDefault()
+          scrollByScreen(-1)
+          break
+        default:
+          break
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    changeFontSize,
+    current.chapterIndex,
+    drawer,
+    jumpToChapter,
+    onBack,
+    scrollByScreen,
+    toggleBookmark
+  ])
 
   const readerStyle = {
     '--reader-font-family': settings.typography.fontFamily,
