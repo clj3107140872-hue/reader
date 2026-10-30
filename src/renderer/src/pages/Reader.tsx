@@ -283,7 +283,10 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
           setBookmarks(next)
           setNotice('已取消书签')
         })
-        .catch((reason: unknown) => setNotice(`操作失败：${String(reason)}`))
+        .catch((reason: unknown) => {
+          console.error('取消书签失败', reason)
+          setNotice('取消书签失败，请稍后重试')
+        })
       return
     }
 
@@ -302,7 +305,10 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
         setBookmarks(next)
         setNotice('已添加书签')
       })
-      .catch((reason: unknown) => setNotice(`操作失败：${String(reason)}`))
+      .catch((reason: unknown) => {
+        console.error('添加书签失败', reason)
+        setNotice('添加书签失败，请稍后重试')
+      })
   }, [book, bookId, bookmarks, current])
 
   const deleteBookmark = useCallback(
@@ -310,7 +316,10 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
       void window.api
         .removeBookmark(bookId, bookmarkId)
         .then(setBookmarks)
-        .catch((reason: unknown) => setNotice(`删除失败：${String(reason)}`))
+        .catch((reason: unknown) => {
+          console.error('删除书签失败', reason)
+          setNotice('删除书签失败，请稍后重试')
+        })
     },
     [bookId]
   )
