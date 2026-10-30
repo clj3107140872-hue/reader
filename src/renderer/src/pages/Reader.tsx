@@ -1,8 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import type { AppSettings, BookMeta, BookProgress } from '../../../core/model'
 import type { OpenBookPayload } from '../../../shared/api'
 import type { SettingsPatch } from '../../../shared/settings'
 import ProgressBar from '../components/ProgressBar'
+import SettingsPanel from '../components/SettingsPanel'
 import {
   chapterIndexForPercent,
   charsBefore,
@@ -62,9 +64,10 @@ const ReaderBody = memo(function ReaderBody({ chapters }: { chapters: ChapterVie
   )
 })
 
-export default function Reader({ bookId, settings, onBack }: ReaderProps) {
+export default function Reader({ bookId, settings, onSettingsChange, onBack }: ReaderProps) {
   const [book, setBook] = useState<OpenBookPayload | null>(null)
   const [error, setError] = useState('')
+  const [drawer, setDrawer] = useState<'settings' | null>(null)
   const [current, setCurrent] = useState<CurrentPosition>({ chapterIndex: 0, paragraphIndex: 0, percent: 0 })
   const scrollRef = useRef<HTMLElement | null>(null)
   const restoredRef = useRef(false)
@@ -213,6 +216,16 @@ export default function Reader({ bookId, settings, onBack }: ReaderProps) {
     scrollToPosition(chapterIndex, 0)
   }
 
+  const readerStyle = {
+    '--reader-font-family': settings.typography.fontFamily,
+    '--reader-font-size': `${settings.typography.fontSize}px`,
+    '--reader-line-height': String(settings.typography.lineHeight),
+    '--reader-paragraph-spacing': `${settings.typography.paragraphSpacing}em`,
+    '--reader-page-padding': `${settings.typography.pagePadding}px`,
+    '--reader-max-width':
+      settings.typography.maxContentWidth === null ? 'none' : `${settings.typography.maxContentWidth}px`
+  } as CSSProperties
+
   if (error) {
     return (
       <div className="reader-error">
@@ -231,7 +244,7 @@ export default function Reader({ bookId, settings, onBack }: ReaderProps) {
   const remainingMinutes = Math.max(0, Math.ceil((total - read) / 400))
 
   return (
-    <div className="reader">
+    <div className="reader" data-theme={settings.theme} style={readerStyle}>
       <header className="reader-toolbar">
         <button className="ghost" onClick={onBack}>
           ← 书架
@@ -239,6 +252,10 @@ export default function Reader({ bookId, settings, onBack }: ReaderProps) {
         <span className="reader-title" title={book.meta.title}>
           {book.meta.title}
         </span>
+        <span className="toolbar-spacer" />
+        <button className="ghost" onClick={() => setDrawer('settings')}>
+          排版
+        </button>
       </header>
 
       <main className="reader-scroll" ref={scrollRef} onScroll={handleScroll}>
@@ -252,6 +269,14 @@ export default function Reader({ bookId, settings, onBack }: ReaderProps) {
         remainingMinutes={remainingMinutes}
         onSeek={seek}
       />
+
+      {drawer === 'settings' && (
+        <SettingsPanel
+          settings={settings}
+          onChange={onSettingsChange}
+          onClose={() => setDrawer(null)}
+        />
+      )}
     </div>
   )
 }
