@@ -9,6 +9,8 @@ type SortMode = 'recent' | 'imported' | 'title'
 type Dialog =
   | { kind: 'source'; entry: LibraryEntry }
   | { kind: 'delete'; entry: LibraryEntry }
+  | { kind: 'reclean'; entry: LibraryEntry }
+  | { kind: 'resplit'; entry: LibraryEntry }
 
 const SORTERS: Record<SortMode, (a: LibraryEntry, b: LibraryEntry) => number> = {
   recent: (a, b) => (b.lastReadAt ?? b.importedAt).localeCompare(a.lastReadAt ?? a.importedAt),
@@ -139,6 +141,33 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     }
   }
 
+  const confirmReprocess = async (
+    entry: LibraryEntry,
+    kind: 'reclean' | 'resplit'
+  ): Promise<void> => {
+    setActionBusy(true)
+    try {
+      const result =
+        kind === 'reclean'
+          ? await window.api.recleanBook(entry.id)
+          : await window.api.resplitBook(entry.id)
+      setDialog(null)
+      const label = kind === 'reclean' ? '重新清洗' : '重新切章'
+      const detail =
+        kind === 'reclean'
+          ? `移除广告 ${result.stats.adLinesRemoved} 行，合并重复段 ${result.stats.duplicateParagraphsMerged} 处`
+          : `共 ${result.chapterCount} 章`
+      notify(
+        `已${label}《${entry.title}》：${detail}${result.warning ? `；${result.warning}` : ''}`
+      )
+      await refresh()
+    } catch (reason) {
+      notify(`${kind === 'reclean' ? '重新清洗' : '重新切章'}失败：${errorText(reason)}`)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
   const sorted = [...entries].sort(SORTERS[sort])
 
   return (
@@ -195,6 +224,22 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
               }}
             >
               查看来源
+            </button>
+            <button
+              onClick={() => {
+                setDialog({ kind: 'reclean', entry: menu.entry })
+                setMenu(null)
+              }}
+            >
+              重新清洗
+            </button>
+            <button
+              onClick={() => {
+                setDialog({ kind: 'resplit', entry: menu.entry })
+                setMenu(null)
+              }}
+            >
+              重新切章
             </button>
             <button
               className="danger"
@@ -280,6 +325,56 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
           <p>确定删除《{dialog.entry.title}》吗？</p>
           <p className="modal-note">
             会移除书架记录和软件内的书籍数据；你导入的原始 TXT 文件不会被删除。
+          </p>
+        </Modal>
+      )}
+
+      {dialog?.kind === 'reclean' && (
+        <Modal
+          title="重新清洗"
+          onClose={() => setDialog(null)}
+          footer={
+            <>
+              <button className="modal-button ghost" onClick={() => setDialog(null)}>
+                取消
+              </button>
+              <button
+                className="modal-button"
+                disabled={actionBusy}
+                onClick={() => void confirmReprocess(dialog.entry, 'reclean')}
+              >
+                {actionBusy ? '处理中…' : '重新清洗'}
+              </button>
+            </>
+          }
+        >
+          <p>将按当前内置清洗规则重新处理《{dialog.entry.title}》。</p>
+          <p className="modal-note">原数据会自动备份，阅读进度和书签保留。</p>
+        </Modal>
+      )}
+
+      {dialog?.kind === 'resplit' && (
+        <Modal
+          title="重新切章"
+          onClose={() => setDialog(null)}
+          footer={
+            <>
+              <button className="modal-button ghost" onClick={() => setDialog(null)}>
+                取消
+              </button>
+              <button
+                className="modal-button"
+                disabled={actionBusy}
+                onClick={() => void confirmReprocess(dialog.entry, 'resplit')}
+              >
+                {actionBusy ? '处理中…' : '重新切章'}
+              </button>
+            </>
+          }
+        >
+          <p>将重新识别源文件中的章节标题并切分《{dialog.entry.title}》。</p>
+          <p className="modal-note">
+            识别不到至少 3 个章节标题时会保持原样。原数据会自动备份，阅读进度和书签保留。
           </p>
         </Modal>
       )}
