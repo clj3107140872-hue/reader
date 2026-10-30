@@ -53,24 +53,38 @@ async function importFiles(files: string[], win: BrowserWindow | null): Promise<
 }
 
 function createWindow(windowState: AppSettings['window']): void {
+  // Development only: automated acceptance runs must not take focus, appear
+  // on the desktop or leave a taskbar entry while they drive the UI.
+  const acceptance = !app.isPackaged && process.env.READER_ACCEPTANCE === '1'
   const win = new BrowserWindow({
     width: windowState.width,
     height: windowState.height,
-    x: windowState.x,
-    y: windowState.y,
+    x: acceptance ? -20000 : windowState.x,
+    y: acceptance ? -20000 : windowState.y,
+    show: !acceptance,
+    skipTaskbar: acceptance,
+    focusable: !acceptance,
     minWidth: 800,
     minHeight: 600,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      offscreen: acceptance,
+      backgroundThrottling: !acceptance
     }
   })
-  if (windowState.maximized) win.maximize()
-  win.on('close', () => {
-    const bounds = win.getNormalBounds()
-    settingsRepo.updateSync({ window: { ...bounds, maximized: win.isMaximized() } })
-  })
+  if (acceptance) {
+    win.webContents.setFrameRate(30)
+  } else if (windowState.maximized) {
+    win.maximize()
+  }
+  if (!acceptance) {
+    win.on('close', () => {
+      const bounds = win.getNormalBounds()
+      settingsRepo.updateSync({ window: { ...bounds, maximized: win.isMaximized() } })
+    })
+  }
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
