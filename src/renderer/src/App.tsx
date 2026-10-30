@@ -7,7 +7,7 @@ function coverInitial(title: string): string {
 
 export default function App() {
   const [entries, setEntries] = useState<LibraryEntry[]>([])
-  const [message, setMessage] = useState('')
+  const [toast, setToast] = useState<{ id: number; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
 
@@ -21,6 +21,12 @@ export default function App() {
       setProgress(`正在处理：${payload.fileName}`)
     })
   }, [])
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = window.setTimeout(() => setToast(null), 5000)
+    return () => window.clearTimeout(timer)
+  }, [toast])
 
   const handleImport = async (): Promise<void> => {
     setBusy(true)
@@ -39,7 +45,10 @@ export default function App() {
       }
       if (summary.errors.length > 0) parts.push(`失败：${summary.errors.join('；')}`)
       if (summary.warnings.length > 0) parts.push(`提示：${summary.warnings.join('；')}`)
-      setMessage(parts.length > 0 ? parts.join(' ｜ ') : '没有导入任何文件')
+      setToast({
+        id: Date.now(),
+        text: parts.length > 0 ? parts.join(' ｜ ') : '没有导入任何文件'
+      })
       await refresh()
     } finally {
       setBusy(false)
@@ -57,7 +66,11 @@ export default function App() {
       </header>
 
       {progress && <p className="hint">{progress}</p>}
-      {message && <p className="hint">{message}</p>}
+      {toast && (
+        <div className="toast" role="status">
+          {toast.text}
+        </div>
+      )}
 
       {entries.length === 0 ? (
         <p className="empty">书架还是空的，拖入或导入一个 TXT 文件开始阅读。</p>
