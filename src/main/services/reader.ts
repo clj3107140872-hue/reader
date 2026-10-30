@@ -54,6 +54,11 @@ export class ReaderService {
     assertBookId(id)
     return this.locked(id, async () => {
       const stored = await this.books.readProgress(id)
+      const existing = stored.bookmarks.find(
+        (item) =>
+          item.chapterKey === input.chapterKey && item.paragraphIndex === input.paragraphIndex
+      )
+      if (existing) return stored.bookmarks
       const bookmark: Bookmark = {
         id: randomUUID(),
         chapterKey: input.chapterKey,

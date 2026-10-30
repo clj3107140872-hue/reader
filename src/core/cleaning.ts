@@ -17,7 +17,7 @@ export const BUILTIN_AD_RULES: AdRule[] = [
     id: 'sentence',
     name: '短句广告',
     type: 'sentence',
-    pattern: '请记住本站|最新章节|一秒记住|加入书签|投推荐票',
+    pattern: '请记住本站|记住本站|记住我们网|最新章节|一秒记住|加入书签|投推荐票',
     enabled: true
   }
 ]

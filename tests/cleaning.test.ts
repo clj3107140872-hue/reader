@@ -67,4 +67,13 @@ describe('cleanChapters', () => {
     const result = cleanChapters([chapter(['甲段。', '乙段。', '甲段。'])], BUILTIN_AD_RULES)
     expect(result.chapters[0].paragraphs).toEqual(['甲段。', '乙段。', '甲段。'])
   })
+
+  it('removes the site reminder fragment found in real books', () => {
+    const result = cleanChapters(
+      [chapter(['正文结束。记住我们网'])],
+      BUILTIN_AD_RULES
+    )
+    expect(result.chapters[0].paragraphs).toEqual(['正文结束。'])
+    expect(result.adLinesRemoved).toBe(1)
+  })
 })

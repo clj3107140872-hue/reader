@@ -111,7 +111,7 @@ describe('ReaderService', () => {
     expect((await service.open(bookId)).bookmarks).toEqual([])
   })
 
-  it('keeps both bookmarks when two writes race for the same book', async () => {
+  it('deduplicates bookmarks at the same position when two writes race', async () => {
     const input = {
       chapterKey: 'hash-1',
       chapterIndex: 0,
@@ -122,8 +122,9 @@ describe('ReaderService', () => {
     await Promise.all([service.addBookmark(bookId, input), service.addBookmark(bookId, input)])
 
     const stored = await service.open(bookId)
-    expect(stored.bookmarks).toHaveLength(2)
-    expect(new Set(stored.bookmarks.map((bookmark) => bookmark.id)).size).toBe(2)
+    expect(stored.bookmarks).toHaveLength(1)
+    expect(stored.bookmarks[0].chapterKey).toBe('hash-1')
+    expect(stored.bookmarks[0].paragraphIndex).toBe(1)
   })
 
   it('rejects a missing chapter file with a readable error', async () => {
