@@ -15,6 +15,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   window: { width: 1200, height: 800, maximized: false }
 }
 
+export const FONT_SIZE_MIN = 12
+export const FONT_SIZE_MAX = 36
+
 const THEMES: ThemeName[] = ['light', 'dark', 'green', 'sepia']
 
 function clamp(value: unknown, min: number, max: number, fallback: number): number {
@@ -44,7 +47,12 @@ export function normalizeSettings(input: unknown): AppSettings {
         typeof typography.fontFamily === 'string' && typography.fontFamily.trim()
           ? typography.fontFamily
           : DEFAULT_SETTINGS.typography.fontFamily,
-      fontSize: clamp(typography.fontSize, 12, 36, DEFAULT_SETTINGS.typography.fontSize),
+      fontSize: clamp(
+        typography.fontSize,
+        FONT_SIZE_MIN,
+        FONT_SIZE_MAX,
+        DEFAULT_SETTINGS.typography.fontSize
+      ),
       lineHeight: clamp(typography.lineHeight, 1.2, 2.5, DEFAULT_SETTINGS.typography.lineHeight),
       paragraphSpacing: clamp(
         typography.paragraphSpacing,

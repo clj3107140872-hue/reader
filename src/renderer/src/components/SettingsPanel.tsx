@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AppSettings, ThemeName } from '../../../core/model'
+import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../../shared/settings'
 import type { SettingsPatch } from '../../../shared/settings'
 
 interface SettingsPanelProps {
@@ -88,8 +89,8 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
           <span>字号</span>
           <input
             type="range"
-            min={14}
-            max={30}
+            min={FONT_SIZE_MIN}
+            max={FONT_SIZE_MAX}
             step={1}
             value={typography.fontSize}
             onChange={(event) => onChange({ typography: { fontSize: Number(event.target.value) } })}

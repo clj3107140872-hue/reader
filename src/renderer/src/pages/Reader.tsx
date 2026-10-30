@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { AppSettings, BookMeta, Bookmark, BookProgress } from '../../../core/model'
 import type { OpenBookPayload } from '../../../shared/api'
+import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../../shared/settings'
 import type { SettingsPatch } from '../../../shared/settings'
 import BookmarksPanel from '../components/BookmarksPanel'
 import ProgressBar from '../components/ProgressBar'
@@ -234,6 +235,15 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
   }, [flush])
 
   useEffect(() => {
+    return () => {
+      if (rafRef.current !== 0) {
+        window.cancelAnimationFrame(rafRef.current)
+        rafRef.current = 0
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     const handleBeforeUnload = (): void => flush()
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
@@ -351,7 +361,10 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
 
   const changeFontSize = useCallback(
     (delta: number): void => {
-      const fontSize = Math.min(36, Math.max(12, settings.typography.fontSize + delta))
+      const fontSize = Math.min(
+        FONT_SIZE_MAX,
+        Math.max(FONT_SIZE_MIN, settings.typography.fontSize + delta)
+      )
       onSettingsChange({ typography: { fontSize } })
     },
     [onSettingsChange, settings.typography.fontSize]
@@ -359,6 +372,12 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'F11') {
+        event.preventDefault()
+        void window.api.toggleFullscreen()
+        return
+      }
+
       const target = event.target as HTMLElement | null
       const editing =
         !!target &&
@@ -399,12 +418,6 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
         }
       }
 
-      if (event.key === 'F11') {
-        event.preventDefault()
-        void window.api.toggleFullscreen()
-        return
-      }
-
       if (event.key === 'Escape') {
         event.preventDefault()
         if (drawer) setDrawer(null)
@@ -424,9 +437,12 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
           jumpToChapter(current.chapterIndex + 1)
           break
         case ' ':
-        case 'PageDown':
           event.preventDefault()
           scrollByScreen(event.shiftKey ? -1 : 1)
+          break
+        case 'PageDown':
+          event.preventDefault()
+          scrollByScreen(1)
           break
         case 'PageUp':
           event.preventDefault()
