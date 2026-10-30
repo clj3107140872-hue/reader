@@ -38,7 +38,11 @@ export interface LibraryEntry {
   title: string
   normalizedTitle: string
   sourceFileName: string
+  /** Every original file name; set when volumes are merged. */
+  sourceFileNames?: string[]
   fileHash: string
+  /** Every source file represented by this entry; set when volumes are merged. */
+  fileHashes?: string[]
   encoding: string
   importedAt: string
   lastReadAt: string | null

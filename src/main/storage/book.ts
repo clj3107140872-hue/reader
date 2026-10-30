@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import type { BookMeta, BookProgress, Bookmark, CleanedChapter } from '../../core/model'
+import { assertBookId } from '../bookId'
 import { atomicWriteJson, ensureDir, pathExists, readJson } from './fsUtil'
 
 export interface BookFiles {
@@ -78,6 +79,24 @@ export class BookRepository {
     return fs.readFile(join(this.bookDir(id), 'source.txt'), 'utf8')
   }
 
+  async readBook(id: string): Promise<BookFiles> {
+    const meta = await this.readMeta(id)
+    const chapters: CleanedChapter[] = []
+    for (const chapter of meta.chapters) {
+      const text = await this.readChapter(id, chapter.index)
+      chapters.push({
+        title: chapter.title,
+        level: chapter.level,
+        startLine: chapter.startLine,
+        paragraphs: text
+          .split(/\n{2,}/)
+          .map((paragraph) => paragraph.trim())
+          .filter(Boolean)
+      })
+    }
+    return { meta, sourceText: await this.readSource(id), chapters }
+  }
+
   async readProgress(id: string): Promise<ProgressFile> {
     const stored = await readJson<ProgressFile>(join(this.bookDir(id), 'progress.json'))
     return stored ?? { progress: null, bookmarks: [] }
@@ -85,5 +104,11 @@ export class BookRepository {
 
   async writeProgress(id: string, value: ProgressFile): Promise<void> {
     await atomicWriteJson(join(this.bookDir(id), 'progress.json'), value)
+  }
+
+  async remove(id: string): Promise<void> {
+    assertBookId(id)
+    await fs.rm(this.bookDir(id), { recursive: true, force: true })
+    await fs.rm(join(this.booksDir(), `.tmp-${id}`), { recursive: true, force: true })
   }
 }

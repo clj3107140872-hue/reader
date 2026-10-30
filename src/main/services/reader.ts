@@ -3,7 +3,7 @@ import type { Bookmark, BookProgress } from '../../core/model'
 import type { NewBookmark, OpenBookPayload } from '../../shared/api'
 import type { BookRepository } from '../storage/book'
 import type { LibraryRepository } from '../storage/library'
-import { assertBookId } from './bookId'
+import { assertBookId } from '../bookId'
 
 export class ReaderService {
   private readonly locks = new Map<string, Promise<unknown>>()

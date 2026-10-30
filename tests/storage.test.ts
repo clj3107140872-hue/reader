@@ -70,6 +70,22 @@ describe('LibraryRepository', () => {
     await writeFile(join(root, 'library.json'), '{ not valid json', 'utf8')
     expect((await library.list()).map((e) => e.id)).toEqual(['a'])
   })
+
+  it('serializes concurrent additions without losing entries', async () => {
+    const library = new LibraryRepository(root)
+    await Promise.all(
+      Array.from({ length: 8 }, (_, index) => library.add(entry(`book-${index}`, `书${index}`)))
+    )
+    expect((await library.list()).map((item) => item.id).sort()).toEqual(
+      Array.from({ length: 8 }, (_, index) => `book-${index}`).sort()
+    )
+  })
+
+  it('finds a book by any of its merged source hashes', async () => {
+    const library = new LibraryRepository(root)
+    await library.add({ ...entry('a', '甲书'), fileHashes: ['hash-a', 'hash-b'] })
+    expect((await library.findByFileHash('hash-b'))?.id).toBe('a')
+  })
 })
 
 describe('BookRepository', () => {
@@ -127,5 +143,35 @@ describe('BookRepository', () => {
     })
     const stored = await books.readProgress('book-2')
     expect(stored.progress?.percent).toBe(50)
+  })
+
+  it('removes a book directory', async () => {
+    const books = new BookRepository(root)
+    await books.writeBook({
+      meta: meta('book-3'),
+      sourceText: '第一章\n第一段。\n第二章\n第二段。',
+      chapters: [
+        { title: '第一章', level: 'chapter', startLine: 0, paragraphs: ['第一段。'] },
+        { title: '第二章', level: 'chapter', startLine: 2, paragraphs: ['第二段。'] }
+      ]
+    })
+    await books.remove('book-3')
+    await expect(books.readMeta('book-3')).rejects.toThrow('书籍数据缺失')
+  })
+
+  it('reads a whole book back for merge and reprocess', async () => {
+    const books = new BookRepository(root)
+    await books.writeBook({
+      meta: meta('book-4'),
+      sourceText: '第一章\n第一段。\n第二章\n第二段。',
+      chapters: [
+        { title: '第一章', level: 'chapter', startLine: 0, paragraphs: ['第一段。'] },
+        { title: '第二章', level: 'chapter', startLine: 2, paragraphs: ['第二段。'] }
+      ]
+    })
+
+    const files = await books.readBook('book-4')
+    expect(files.chapters.map((chapter) => chapter.paragraphs)).toEqual([['第一段。'], ['第二段。']])
+    expect(files.sourceText).toContain('第一章')
   })
 })

@@ -1,6 +1,6 @@
 import type { SearchHit, SearchProgress, SearchResults } from '../../shared/api'
 import type { BookRepository } from '../storage/book'
-import { assertBookId } from './bookId'
+import { assertBookId } from '../bookId'
 
 const MAX_HITS = 300
 

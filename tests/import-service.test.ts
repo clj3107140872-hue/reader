@@ -45,6 +45,8 @@ describe('ImportService', () => {
 
     expect(outcome.entry.chapterCount).toBe(50)
     expect(outcome.entry.encoding).toBe('gb18030')
+    expect(outcome.entry.fileHashes).toEqual([expect.any(String)])
+    expect(outcome.entry.sourceFileNames).toEqual(['斗罗大陆_1-50章.txt'])
     expect(outcome.entry.stats.adLinesRemoved).toBe(50)
     expect((await library.list())).toHaveLength(1)
     expect((await books.readMeta(outcome.entry.id)).chapters).toHaveLength(50)

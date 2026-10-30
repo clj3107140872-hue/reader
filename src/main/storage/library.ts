@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import type { LibraryEntry } from '../../core/model'
 import { atomicWriteJson, readJson } from './fsUtil'
+import { Mutex } from './mutex'
 
 interface LibraryFile {
   version: 1
@@ -8,6 +9,8 @@ interface LibraryFile {
 }
 
 export class LibraryRepository {
+  private readonly mutex = new Mutex()
+
   constructor(private readonly root: string) {}
 
   private get file(): string {
@@ -21,31 +24,47 @@ export class LibraryRepository {
     return backup?.entries ?? []
   }
 
+  /** Runs a read-modify-write against the library without interleaving. */
+  runExclusive<T>(task: () => Promise<T>): Promise<T> {
+    return this.mutex.runExclusive(task)
+  }
+
+  /** Only call while holding runExclusive (repository mutations do this). */
   async save(entries: LibraryEntry[]): Promise<void> {
     await atomicWriteJson(this.file, { version: 1, entries })
   }
 
   async add(entry: LibraryEntry): Promise<void> {
-    const entries = await this.list()
-    if (entries.some((existing) => existing.id === entry.id)) return
-    entries.push(entry)
-    await this.save(entries)
+    await this.runExclusive(async () => {
+      const entries = await this.list()
+      if (entries.some((existing) => existing.id === entry.id)) return
+      entries.push(entry)
+      await this.save(entries)
+    })
   }
 
   async update(id: string, patch: Partial<LibraryEntry>): Promise<void> {
-    const entries = await this.list()
-    const index = entries.findIndex((entry) => entry.id === id)
-    if (index < 0) return
-    entries[index] = { ...entries[index], ...patch }
-    await this.save(entries)
+    await this.runExclusive(async () => {
+      const entries = await this.list()
+      const index = entries.findIndex((entry) => entry.id === id)
+      if (index < 0) return
+      entries[index] = { ...entries[index], ...patch }
+      await this.save(entries)
+    })
   }
 
   async remove(id: string): Promise<void> {
-    await this.save((await this.list()).filter((entry) => entry.id !== id))
+    await this.runExclusive(async () => {
+      await this.save((await this.list()).filter((entry) => entry.id !== id))
+    })
   }
 
   async findByFileHash(fileHash: string): Promise<LibraryEntry | null> {
     const entries = await this.list()
-    return entries.find((entry) => entry.fileHash === fileHash) ?? null
+    return (
+      entries.find(
+        (entry) => entry.fileHash === fileHash || entry.fileHashes?.includes(fileHash)
+      ) ?? null
+    )
   }
 }
