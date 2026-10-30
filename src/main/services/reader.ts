@@ -3,10 +3,7 @@ import type { Bookmark, BookProgress } from '../../core/model'
 import type { NewBookmark, OpenBookPayload } from '../../shared/api'
 import type { BookRepository } from '../storage/book'
 import type { LibraryRepository } from '../storage/library'
-
-function assertBookId(id: string): void {
-  if (!/^[A-Za-z0-9-]+$/.test(id)) throw new Error('无效的书籍编号')
-}
+import { assertBookId } from './bookId'
 
 export class ReaderService {
   private readonly locks = new Map<string, Promise<unknown>>()

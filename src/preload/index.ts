@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { ReaderApi } from '../shared/api'
+import type { ReaderApi, SearchProgress } from '../shared/api'
 
 const api: ReaderApi = {
   ping: () => ipcRenderer.invoke('app:ping'),
@@ -19,6 +19,17 @@ const api: ReaderApi = {
   saveProgress: (id, progress) => ipcRenderer.invoke('progress:save', id, progress),
   addBookmark: (id, bookmark) => ipcRenderer.invoke('bookmark:add', id, bookmark),
   removeBookmark: (id, bookmarkId) => ipcRenderer.invoke('bookmark:remove', id, bookmarkId),
+  searchBook: (id, query, token) => ipcRenderer.invoke('book:search', id, query, token),
+  cancelSearch: (token) => ipcRenderer.invoke('search:cancel', token),
+  onSearchProgress: (callback) => {
+    const listener = (_event: unknown, payload: SearchProgress): void => {
+      callback(payload)
+    }
+    ipcRenderer.on('search:progress', listener)
+    return () => {
+      ipcRenderer.removeListener('search:progress', listener)
+    }
+  },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
   toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen')

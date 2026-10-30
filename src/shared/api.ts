@@ -23,6 +23,26 @@ export interface NewBookmark {
   excerpt: string
 }
 
+export interface SearchHit {
+  chapterIndex: number
+  chapterKey: string
+  paragraphIndex: number
+  excerpt: string
+}
+
+export interface SearchProgress {
+  token: string
+  scanned: number
+  total: number
+}
+
+export interface SearchResults {
+  token: string
+  hits: SearchHit[]
+  truncated: boolean
+  cancelled: boolean
+}
+
 export interface ReaderApi {
   ping(): Promise<string>
   libraryList(): Promise<LibraryEntry[]>
@@ -34,6 +54,9 @@ export interface ReaderApi {
   saveProgress(id: string, progress: BookProgress): Promise<void>
   addBookmark(id: string, bookmark: NewBookmark): Promise<Bookmark[]>
   removeBookmark(id: string, bookmarkId: string): Promise<Bookmark[]>
+  searchBook(id: string, query: string, token: string): Promise<SearchResults>
+  cancelSearch(token: string): Promise<void>
+  onSearchProgress(cb: (payload: SearchProgress) => void): () => void
   getSettings(): Promise<AppSettings>
   updateSettings(patch: SettingsPatch): Promise<AppSettings>
   toggleFullscreen(): Promise<boolean>

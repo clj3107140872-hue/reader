@@ -7,6 +7,7 @@ import type { SettingsPatch } from '../shared/settings'
 import { ImportService } from './services/import'
 import { resolveDataDir } from './services/paths'
 import { ReaderService } from './services/reader'
+import { SearchService } from './services/search'
 import { BookRepository } from './storage/book'
 import { LibraryRepository } from './storage/library'
 import { SettingsRepository } from './storage/settings'
@@ -23,6 +24,7 @@ const books = new BookRepository(dataDir)
 const importer = new ImportService(library, books)
 const settingsRepo = new SettingsRepository(dataDir)
 const reader = new ReaderService(library, books)
+const search = new SearchService(books)
 
 async function importFiles(files: string[], win: BrowserWindow | null): Promise<ImportSummary> {
   let imported = 0
@@ -132,6 +134,15 @@ app.whenReady().then(async () => {
   ipcMain.handle('bookmark:remove', (_event, id: string, bookmarkId: string) =>
     reader.removeBookmark(id, bookmarkId)
   )
+  ipcMain.handle('book:search', (event, id: string, query: string, token: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return search.search(id, query, token, (payload) => {
+      win?.webContents.send('search:progress', payload)
+    })
+  })
+  ipcMain.handle('search:cancel', (_event, token: string) => {
+    search.cancel(token)
+  })
 
   // Development only: lets automation import files without driving the native
   // dialog. Packaged builds do not register this handler.

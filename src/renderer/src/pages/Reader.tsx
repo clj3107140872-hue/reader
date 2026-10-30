@@ -4,6 +4,7 @@ import type { AppSettings, BookMeta, BookProgress } from '../../../core/model'
 import type { OpenBookPayload } from '../../../shared/api'
 import type { SettingsPatch } from '../../../shared/settings'
 import ProgressBar from '../components/ProgressBar'
+import SearchPanel from '../components/SearchPanel'
 import SettingsPanel from '../components/SettingsPanel'
 import TocDrawer from '../components/TocDrawer'
 import {
@@ -68,7 +69,7 @@ const ReaderBody = memo(function ReaderBody({ chapters }: { chapters: ChapterVie
 export default function Reader({ bookId, settings, onSettingsChange, onBack }: ReaderProps) {
   const [book, setBook] = useState<OpenBookPayload | null>(null)
   const [error, setError] = useState('')
-  const [drawer, setDrawer] = useState<'toc' | 'settings' | null>(null)
+  const [drawer, setDrawer] = useState<'toc' | 'search' | 'bookmarks' | 'settings' | null>(null)
   const [current, setCurrent] = useState<CurrentPosition>({ chapterIndex: 0, paragraphIndex: 0, percent: 0 })
   const scrollRef = useRef<HTMLElement | null>(null)
   const restoredRef = useRef(false)
@@ -232,6 +233,26 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
     [book, paragraphs, scheduleSave, scrollToPosition]
   )
 
+  const jumpToPosition = useCallback(
+    (chapterIndex: number, paragraphIndex: number): void => {
+      if (!book) return
+      const index = Math.min(Math.max(chapterIndex, 0), book.meta.chapters.length - 1)
+      const percent = percentAt(book.meta, index, paragraphIndex, paragraphs)
+      const next = { chapterIndex: index, paragraphIndex, percent }
+      setCurrent(next)
+      scheduleSave(next)
+      scrollToPosition(index, paragraphIndex)
+      const target = scrollRef.current?.querySelector<HTMLElement>(
+        `[data-chapter-index="${index}"][data-paragraph-index="${paragraphIndex}"]`
+      )
+      if (target) {
+        target.classList.add('search-flash')
+        window.setTimeout(() => target.classList.remove('search-flash'), 2000)
+      }
+    },
+    [book, paragraphs, scheduleSave, scrollToPosition]
+  )
+
   const readerStyle = {
     '--reader-font-family': settings.typography.fontFamily,
     '--reader-font-size': `${settings.typography.fontSize}px`,
@@ -272,6 +293,9 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
         <button className="ghost" onClick={() => setDrawer('toc')}>
           目录
         </button>
+        <button className="ghost" onClick={() => setDrawer('search')}>
+          搜索
+        </button>
         <button className="ghost" onClick={() => setDrawer('settings')}>
           排版
         </button>
@@ -294,6 +318,15 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
           chapters={book.meta.chapters}
           currentIndex={current.chapterIndex}
           onSelect={jumpToChapter}
+          onClose={() => setDrawer(null)}
+        />
+      )}
+
+      {drawer === 'search' && (
+        <SearchPanel
+          bookId={bookId}
+          chapters={book.meta.chapters}
+          onJump={jumpToPosition}
           onClose={() => setDrawer(null)}
         />
       )}
