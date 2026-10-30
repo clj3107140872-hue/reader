@@ -43,6 +43,13 @@ function splitParagraphs(text: string): string[] {
     .filter(Boolean)
 }
 
+/**
+ * Chromium turns one wheel notch into 100px of scrolling. At the default
+ * typography that is about three lines, so the reader scales it down to keep
+ * a notch close to two lines.
+ */
+const WHEEL_DISTANCE_SCALE = 0.64
+
 /** Nearest paragraph inside a chapter section, measured against the probe line. */
 function positionInSection(
   section: HTMLElement,
@@ -248,6 +255,25 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [flush])
+
+  useEffect(() => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+
+    // Native wheel scrolling animates the full 100px notch, which blurs the
+    // text while it moves. Scroll a shorter distance and land on it at once
+    // so every step stays sharp.
+    const handleWheel = (event: WheelEvent): void => {
+      if (event.ctrlKey || event.shiftKey) return
+      if (event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return
+      if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
+      event.preventDefault()
+      scroller.scrollTop += event.deltaY * WHEEL_DISTANCE_SCALE
+    }
+
+    scroller.addEventListener('wheel', handleWheel, { passive: false })
+    return () => scroller.removeEventListener('wheel', handleWheel)
+  }, [book])
 
   const seek = (percent: number): void => {
     if (!book) return
