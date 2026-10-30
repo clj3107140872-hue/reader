@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
 import type { OpenDialogOptions } from 'electron'
 import { basename, join } from 'node:path'
 import type { AppSettings, BookProgress } from '../core/model'
@@ -161,6 +161,9 @@ app.whenReady().then(async () => {
     })
   }
 
+  // Renderer-owned shortcuts (F11, Ctrl+-) must not be shadowed by Electron's
+  // default menu accelerators, and the default Reload/DevTools entries stay out.
+  Menu.setApplicationMenu(null)
   createWindow(settings.window)
 })
 
