@@ -143,6 +143,18 @@ describe('ReprocessService', () => {
     expect((await library.list())[0].chapterCount).toBe(3)
   })
 
+  it('keeps the first line when recleaning a no-title book', async () => {
+    const sourceText = '开头。\n第二段。'
+    await seed(sourceText, [
+      { title: '正文', level: 'chapter', startLine: 0, paragraphs: ['开头。', '第二段。'] }
+    ])
+
+    await service.reclean('book-1')
+
+    expect(await books.readChapter('book-1', 0)).toBe('开头。\n\n第二段。')
+    expect(await books.readSource('book-1')).toBe(sourceText)
+  })
+
   it('keeps the book unchanged when no chapter titles are detected', async () => {
     const sourceText = '第一章\n甲。\n第二章\n乙。'
     await seed(sourceText, [

@@ -34,10 +34,53 @@ function meta(): BookMeta {
   }
 }
 
+function metaWith(chapters: Array<{ title: string; startLine: number }>): BookMeta {
+  return {
+    version: 1,
+    id: 'a',
+    title: '测试书',
+    encoding: 'utf8',
+    chapters: chapters.map((chapter, index) => ({
+      index,
+      title: chapter.title,
+      level: 'chapter' as const,
+      titleHash: String(index),
+      startLine: chapter.startLine,
+      charCount: 0,
+      simhash: '0',
+      flags: {}
+    })),
+    createdAt: '2026-01-01T00:00:00.000Z'
+  }
+}
+
 describe('chaptersFromLines', () => {
   it('rebuilds chapter paragraphs from saved line numbers', () => {
     const chapters = chaptersFromLines('第一章\n甲。\n\n第二章\n乙。\n丙。', meta())
     expect(chapters.map((chapter) => chapter.paragraphs)).toEqual([['甲。'], ['乙。', '丙。']])
     expect(chapters.map((chapter) => chapter.startLine)).toEqual([0, 3])
+  })
+
+  it('keeps the first line of a synthetic preface chapter', () => {
+    const chapters = chaptersFromLines(
+      '前言段。\n第一章\n甲。\n第二章\n乙。\n第三章\n丙。',
+      metaWith([
+        { title: '前言', startLine: 0 },
+        { title: '第一章', startLine: 1 },
+        { title: '第二章', startLine: 3 },
+        { title: '第三章', startLine: 5 }
+      ])
+    )
+    expect(chapters.map((chapter) => chapter.paragraphs)).toEqual([
+      ['前言段。'],
+      ['甲。'],
+      ['乙。'],
+      ['丙。']
+    ])
+  })
+
+  it('keeps the first line of a no-title chapter', () => {
+    const chapters = chaptersFromLines('开头。\n第二段。', metaWith([{ title: '正文', startLine: 0 }]))
+    expect(chapters.map((chapter) => chapter.paragraphs)).toEqual([['开头。', '第二段。']])
   })
 })
