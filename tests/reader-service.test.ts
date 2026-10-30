@@ -111,6 +111,21 @@ describe('ReaderService', () => {
     expect((await service.open(bookId)).bookmarks).toEqual([])
   })
 
+  it('keeps both bookmarks when two writes race for the same book', async () => {
+    const input = {
+      chapterKey: 'hash-1',
+      chapterIndex: 0,
+      paragraphIndex: 1,
+      excerpt: '另一段。'
+    }
+
+    await Promise.all([service.addBookmark(bookId, input), service.addBookmark(bookId, input)])
+
+    const stored = await service.open(bookId)
+    expect(stored.bookmarks).toHaveLength(2)
+    expect(new Set(stored.bookmarks.map((bookmark) => bookmark.id)).size).toBe(2)
+  })
+
   it('rejects a missing chapter file with a readable error', async () => {
     const payload = await service.open(bookId)
     await rm(join(root, 'books', bookId, 'chapters', '00001.txt'))
