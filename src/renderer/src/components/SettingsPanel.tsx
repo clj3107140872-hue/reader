@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type { AppSettings, ThemeName } from '../../../core/model'
 import type { SettingsPatch } from '../../../shared/settings'
 
@@ -26,6 +27,23 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
   const fonts = FONTS.some((font) => font.value === typography.fontFamily)
     ? FONTS
     : [{ label: '当前字体', value: typography.fontFamily }, ...FONTS]
+
+  const [maxWidthDraft, setMaxWidthDraft] = useState(String(typography.maxContentWidth ?? 860))
+
+  useEffect(() => {
+    setMaxWidthDraft(String(typography.maxContentWidth ?? 860))
+  }, [typography.maxContentWidth])
+
+  const commitMaxWidth = (): void => {
+    const parsed = Number(maxWidthDraft)
+    if (maxWidthDraft.trim() === '' || !Number.isFinite(parsed)) {
+      setMaxWidthDraft(String(typography.maxContentWidth ?? 860))
+      return
+    }
+    const clamped = Math.min(2000, Math.max(400, Math.round(parsed)))
+    setMaxWidthDraft(String(clamped))
+    onChange({ typography: { maxContentWidth: clamped } })
+  }
 
   return (
     <aside className="reader-drawer right settings-panel">
@@ -128,10 +146,12 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
             max={2000}
             step={20}
             disabled={typography.maxContentWidth === null}
-            value={typography.maxContentWidth ?? 860}
-            onChange={(event) =>
-              onChange({ typography: { maxContentWidth: Number(event.target.value) } })
-            }
+            value={maxWidthDraft}
+            onChange={(event) => setMaxWidthDraft(event.target.value)}
+            onBlur={commitMaxWidth}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur()
+            }}
           />
           <label className="inline-check">
             <input
