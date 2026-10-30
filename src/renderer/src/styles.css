@@ -387,3 +387,46 @@ body {
 .search-chapter { font-size: 12px; color: var(--reader-accent); }
 .search-excerpt { font-size: 13px; line-height: 1.5; overflow-wrap: break-word; }
 .reader-paragraph.search-flash { background: rgba(255, 214, 102, 0.45); transition: background 300ms ease-out; }
+
+.bookmarks-empty { color: var(--reader-muted); font-size: 13px; padding: 24px 16px; line-height: 1.6; }
+.bookmark-list { list-style: none; margin: 0; padding: 4px 0 24px; }
+.bookmark-item { display: flex; align-items: stretch; border-bottom: 1px solid var(--reader-border); }
+.bookmark-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--reader-text);
+  text-align: left;
+  padding: 10px 8px 10px 16px;
+  cursor: pointer;
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.bookmark-main:hover { background: var(--reader-hover); }
+.bookmark-chapter { font-size: 12px; color: var(--reader-accent); }
+.bookmark-excerpt { font-size: 13px; line-height: 1.5; overflow-wrap: break-word; }
+.bookmark-delete {
+  flex: 0 0 40px;
+  border: none;
+  background: transparent;
+  color: var(--reader-muted);
+  font-size: 18px;
+  cursor: pointer;
+}
+.bookmark-delete:hover { color: #a45b2a; }
+.reader-notice {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  background: rgba(43, 43, 43, 0.9);
+  color: #fff;
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  animation: toast-in 180ms ease-out;
+}

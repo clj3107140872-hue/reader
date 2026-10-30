@@ -1,8 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { AppSettings, BookMeta, BookProgress } from '../../../core/model'
+import type { AppSettings, BookMeta, Bookmark, BookProgress } from '../../../core/model'
 import type { OpenBookPayload } from '../../../shared/api'
 import type { SettingsPatch } from '../../../shared/settings'
+import BookmarksPanel from '../components/BookmarksPanel'
 import ProgressBar from '../components/ProgressBar'
 import SearchPanel from '../components/SearchPanel'
 import SettingsPanel from '../components/SettingsPanel'
@@ -71,6 +72,8 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
   const [error, setError] = useState('')
   const [drawer, setDrawer] = useState<'toc' | 'search' | 'bookmarks' | 'settings' | null>(null)
   const [current, setCurrent] = useState<CurrentPosition>({ chapterIndex: 0, paragraphIndex: 0, percent: 0 })
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
+  const [notice, setNotice] = useState('')
   const scrollRef = useRef<HTMLElement | null>(null)
   const restoredRef = useRef(false)
   const rafRef = useRef(0)
@@ -85,7 +88,10 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
     window.api
       .openBook(bookId)
       .then((payload) => {
-        if (alive) setBook(payload)
+        if (alive) {
+          setBook(payload)
+          setBookmarks(payload.bookmarks)
+        }
       })
       .catch((reason: unknown) => {
         if (alive) setError(reason instanceof Error ? reason.message : String(reason))
@@ -94,6 +100,12 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
       alive = false
     }
   }, [bookId])
+
+  useEffect(() => {
+    if (!notice) return
+    const timer = window.setTimeout(() => setNotice(''), 1600)
+    return () => window.clearTimeout(timer)
+  }, [notice])
 
   const chapters = useMemo<ChapterView[]>(() => {
     if (!book) return []
@@ -253,6 +265,56 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
     [book, paragraphs, scheduleSave, scrollToPosition]
   )
 
+  const toggleBookmark = useCallback((): void => {
+    if (!book) return
+    const chapterIndex = current.chapterIndex
+    const paragraphIndex = current.paragraphIndex
+    const chapter = book.meta.chapters[chapterIndex]
+    if (!chapter) return
+    const existing = bookmarks.find(
+      (bookmark) =>
+        bookmark.chapterKey === chapter.titleHash && bookmark.paragraphIndex === paragraphIndex
+    )
+
+    if (existing) {
+      void window.api
+        .removeBookmark(bookId, existing.id)
+        .then((next) => {
+          setBookmarks(next)
+          setNotice('已取消书签')
+        })
+        .catch((reason: unknown) => setNotice(`操作失败：${String(reason)}`))
+      return
+    }
+
+    const element = scrollRef.current?.querySelector<HTMLElement>(
+      `[data-chapter-index="${chapterIndex}"][data-paragraph-index="${paragraphIndex}"]`
+    )
+    const excerpt = (element?.textContent ?? '').trim().slice(0, 60)
+    void window.api
+      .addBookmark(bookId, {
+        chapterKey: chapter.titleHash,
+        chapterIndex,
+        paragraphIndex,
+        excerpt
+      })
+      .then((next) => {
+        setBookmarks(next)
+        setNotice('已添加书签')
+      })
+      .catch((reason: unknown) => setNotice(`操作失败：${String(reason)}`))
+  }, [book, bookId, bookmarks, current])
+
+  const deleteBookmark = useCallback(
+    (bookmarkId: string): void => {
+      void window.api
+        .removeBookmark(bookId, bookmarkId)
+        .then(setBookmarks)
+        .catch((reason: unknown) => setNotice(`删除失败：${String(reason)}`))
+    },
+    [bookId]
+  )
+
   const readerStyle = {
     '--reader-font-family': settings.typography.fontFamily,
     '--reader-font-size': `${settings.typography.fontSize}px`,
@@ -296,6 +358,9 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
         <button className="ghost" onClick={() => setDrawer('search')}>
           搜索
         </button>
+        <button className="ghost" onClick={() => setDrawer('bookmarks')}>
+          书签{bookmarks.length > 0 ? ` ${bookmarks.length}` : ''}
+        </button>
         <button className="ghost" onClick={() => setDrawer('settings')}>
           排版
         </button>
@@ -338,6 +403,18 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
           onClose={() => setDrawer(null)}
         />
       )}
+
+      {drawer === 'bookmarks' && (
+        <BookmarksPanel
+          bookmarks={bookmarks}
+          chapters={book.meta.chapters}
+          onJump={jumpToPosition}
+          onDelete={deleteBookmark}
+          onClose={() => setDrawer(null)}
+        />
+      )}
+
+      {notice && <div className="reader-notice">{notice}</div>}
     </div>
   )
 }
