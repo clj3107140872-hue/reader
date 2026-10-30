@@ -7,6 +7,8 @@ import { chapterMatchRate, normalizeBookTitle } from '../../core/sameBook'
 import type { BookRepository } from '../storage/book'
 import type { LibraryRepository } from '../storage/library'
 
+export type ImportStage = 'reading' | 'parsing' | 'writing' | 'done'
+
 export interface ImportOutcome {
   entry: LibraryEntry
   suspects: { id: string; title: string; overlap: number }[]
@@ -25,7 +27,11 @@ export class ImportService {
     private readonly userRules: () => AdRule[] = () => []
   ) {}
 
-  async importFile(filePath: string): Promise<ImportOutcome | DuplicateOutcome> {
+  async importFile(
+    filePath: string,
+    onStage: (stage: ImportStage) => void = () => {}
+  ): Promise<ImportOutcome | DuplicateOutcome> {
+    onStage('reading')
     const contents = await readFile(filePath)
     const fileHash = createHash('sha256').update(contents).digest('hex')
 
@@ -33,8 +39,10 @@ export class ImportService {
     if (existingByHash) return { duplicate: true, title: existingByHash.title }
 
     const fileName = basename(filePath)
+    onStage('parsing')
     const parsed = parseBookFile(contents, fileName, { userRules: this.userRules() })
 
+    onStage('writing')
     await this.books.writeBook({
       meta: parsed.meta,
       sourceText: parsed.sourceText,
@@ -57,6 +65,7 @@ export class ImportService {
       stats: parsed.stats
     }
     await this.library.add(entry)
+    onStage('done')
 
     const suspects: ImportOutcome['suspects'] = []
     for (const other of await this.library.list()) {

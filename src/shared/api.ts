@@ -22,6 +22,7 @@ export interface ImportSummary {
   suspects: ImportSuspect[]
   errors: string[]
   warnings: string[]
+  canceled?: boolean
 }
 
 export interface MergeResult {
@@ -78,6 +79,9 @@ export interface ReaderApi {
   libraryList(): Promise<LibraryEntry[]>
   removeBook(id: string): Promise<void>
   chooseAndImport(): Promise<ImportSummary>
+  importPaths(paths: string[]): Promise<ImportSummary>
+  /** Resolves the on-disk path of a file dropped onto the window. */
+  pathForFile(file: unknown): string
   /** Development builds only; rejects in packaged builds. */
   debugImport(paths: string[]): Promise<ImportSummary>
   onImportProgress(cb: (payload: { fileName: string; stage: string }) => void): () => void

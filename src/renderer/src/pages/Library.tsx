@@ -3,6 +3,7 @@ import type { LibraryEntry } from '../../../core/model'
 import type { ImportSummary, ImportSuspect } from '../../../shared/api'
 import BookCard from '../components/BookCard'
 import Modal from '../components/Modal'
+import { useFileDrop } from '../hooks/useFileDrop'
 
 type SortMode = 'recent' | 'imported' | 'title'
 
@@ -16,6 +17,13 @@ const SORTERS: Record<SortMode, (a: LibraryEntry, b: LibraryEntry) => number> = 
   recent: (a, b) => (b.lastReadAt ?? b.importedAt).localeCompare(a.lastReadAt ?? a.importedAt),
   imported: (a, b) => b.importedAt.localeCompare(a.importedAt),
   title: (a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN')
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  reading: '读取中',
+  parsing: '解析中',
+  writing: '写入中',
+  done: '完成'
 }
 
 function formatTime(iso: string): string {
@@ -56,7 +64,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   useEffect(() => {
     void refresh()
     return window.api.onImportProgress((payload) => {
-      setProgress(`正在处理：${payload.fileName}`)
+      setProgress(`正在处理：${payload.fileName} · ${STAGE_LABELS[payload.stage] ?? payload.stage}`)
     })
   }, [])
 
@@ -76,6 +84,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   }, [menu])
 
   const applySummary = async (summary: ImportSummary): Promise<void> => {
+    if (summary.canceled) return
     const parts: string[] = []
     if (summary.imported > 0) parts.push(`成功导入 ${summary.imported} 本`)
     if (summary.duplicates.length > 0) parts.push(`已在书库：${summary.duplicates.join('、')}`)
@@ -126,6 +135,19 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   }
 
   const skipMerge = (): void => setMergeQueue((queue) => queue.slice(1))
+
+  const importPaths = async (paths: string[]): Promise<void> => {
+    if (busyRef.current) {
+      notify('正在导入，请稍候')
+      return
+    }
+    await runImport(() => window.api.importPaths(paths))
+  }
+
+  const dragging = useFileDrop((paths) => {
+    if (dialog || pendingMerge) return
+    void importPaths(paths)
+  })
 
   const confirmDelete = async (entry: LibraryEntry): Promise<void> => {
     setActionBusy(true)
@@ -196,6 +218,9 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
         <div className="toast" role="status">
           {toast.text}
         </div>
+      )}
+      {dragging && !dialog && !pendingMerge && (
+        <div className="drop-overlay">松开鼠标，导入 TXT</div>
       )}
 
       {entries.length === 0 ? (

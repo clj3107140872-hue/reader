@@ -1,11 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
-import type { OpenDialogOptions } from 'electron'
+import type { MessageBoxOptions, OpenDialogOptions, WebContents } from 'electron'
 import { join } from 'node:path'
 import type { AppSettings, BookProgress } from '../core/model'
 import type { NewBookmark } from '../shared/api'
 import type { SettingsPatch } from '../shared/settings'
 import { ImportService } from './services/import'
-import { ImportQueue } from './services/importQueue'
+import { formatFileSize, ImportQueue } from './services/importQueue'
 import { LibraryService } from './services/library'
 import { MergeService } from './services/merge'
 import { resolveDataDir } from './services/paths'
@@ -37,7 +37,32 @@ const search = new SearchService(books)
 const merger = new MergeService(library, books)
 const libraryService = new LibraryService(library, books)
 const reprocess = new ReprocessService(library, books)
-const importQueue = new ImportQueue(importer)
+const importQueue = new ImportQueue(importer, {
+  confirmLargeFile: async ({ fileName, size }) => {
+    if (ACCEPTANCE) return true
+    const win = BrowserWindow.getFocusedWindow()
+    const options: MessageBoxOptions = {
+      type: 'question',
+      buttons: ['继续导入', '取消'],
+      defaultId: 0,
+      cancelId: 1,
+      title: '导入较大的文件',
+      message: `${fileName} 有 ${formatFileSize(size)}`,
+      detail: '较大的文件解析需要一些时间，继续导入吗？'
+    }
+    const result = win
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options)
+    return result.response === 0
+  }
+})
+
+function sendImportProgress(
+  sender: WebContents,
+  payload: { fileName: string; stage: string }
+): void {
+  if (!sender.isDestroyed()) sender.send('import:progress', payload)
+}
 
 function createWindow(windowState: AppSettings['window']): void {
   const win = new BrowserWindow({
@@ -96,8 +121,8 @@ app.whenReady().then(async () => {
     return next
   })
   ipcMain.handle('library:list', () => library.list())
-  ipcMain.handle('library:choose-import', async () => {
-    const win = BrowserWindow.getFocusedWindow()
+  ipcMain.handle('library:choose-import', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
     const options: OpenDialogOptions = {
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: '文本文件', extensions: ['txt'] }]
@@ -107,10 +132,27 @@ app.whenReady().then(async () => {
       : await dialog.showOpenDialog(options)
 
     if (selection.canceled || selection.filePaths.length === 0) {
-      return { imported: 0, duplicates: [], suspects: [], errors: [], warnings: [] }
+      return {
+        imported: 0,
+        duplicates: [],
+        suspects: [],
+        errors: [],
+        warnings: [],
+        canceled: true
+      }
     }
 
-    return importQueue.importFiles(selection.filePaths)
+    return importQueue.importFiles(selection.filePaths, (payload) =>
+      sendImportProgress(event.sender, payload)
+    )
+  })
+  ipcMain.handle('library:import-paths', (event, paths: unknown) => {
+    const safePaths = Array.isArray(paths)
+      ? paths.filter((path): path is string => typeof path === 'string')
+      : []
+    return importQueue.importFiles(safePaths, (payload) =>
+      sendImportProgress(event.sender, payload)
+    )
   })
   ipcMain.handle('book:open', (_event, id: string) => reader.open(id))
   ipcMain.handle('progress:save', (_event, id: string, progress: BookProgress) =>
@@ -141,9 +183,13 @@ app.whenReady().then(async () => {
   // Development only: lets automation import files without driving the native
   // dialog. Packaged builds do not register this handler.
   if (!app.isPackaged) {
-    ipcMain.handle('debug:import', (_event, paths: string[]) => {
-      const safePaths = Array.isArray(paths) ? paths.filter((path) => typeof path === 'string') : []
-      return importQueue.importFiles(safePaths)
+    ipcMain.handle('debug:import', (event, paths: string[]) => {
+      const safePaths = Array.isArray(paths)
+        ? paths.filter((path) => typeof path === 'string')
+        : []
+      return importQueue.importFiles(safePaths, (payload) =>
+        sendImportProgress(event.sender, payload)
+      )
     })
   }
 

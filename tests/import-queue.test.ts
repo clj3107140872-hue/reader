@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import iconv from 'iconv-lite'
@@ -53,5 +53,65 @@ describe('ImportQueue', () => {
         title: '测试书_1-3章'
       })
     )
+  })
+
+  it('skips non-txt files and directories with readable warnings', async () => {
+    const jpg = join(root, '封面.jpg')
+    const folder = join(root, '文件夹.txt')
+    await writeFile(jpg, 'not a book')
+    await mkdir(folder)
+
+    const queue = new ImportQueue(new ImportService(library, books))
+    const summary = await queue.importFiles([jpg, folder])
+
+    expect(summary.imported).toBe(0)
+    expect(summary.warnings.join('')).toContain('只支持 TXT 文件')
+    expect(summary.warnings.join('')).toContain('不是文件')
+    expect(await library.list()).toEqual([])
+  })
+
+  it('asks before importing a large file and respects the answer', async () => {
+    const file = join(root, '大书.txt')
+    await writeFile(file, iconv.encode(makeBookText(1, 3), 'utf8'))
+    const calls: { fileName: string; size: number }[] = []
+
+    const rejected = new ImportQueue(new ImportService(library, books), {
+      largeFileBytes: 10,
+      confirmLargeFile: async (info) => {
+        calls.push(info)
+        return false
+      }
+    })
+    const skipped = await rejected.importFiles([file])
+    expect(skipped.imported).toBe(0)
+    expect(calls[0].fileName).toBe('大书.txt')
+    expect(calls[0].size).toBeGreaterThan(10)
+    expect(skipped.warnings.join('')).toContain('已跳过')
+
+    const accepted = new ImportQueue(new ImportService(library, books), {
+      largeFileBytes: 10,
+      confirmLargeFile: async () => true
+    })
+    const imported = await accepted.importFiles([file])
+    expect(imported.imported).toBe(1)
+  })
+
+  it('reports missing files without aborting the batch', async () => {
+    const queue = new ImportQueue(new ImportService(library, books))
+    const summary = await queue.importFiles([join(root, '不存在.txt')])
+
+    expect(summary.errors).toEqual([])
+    expect(summary.warnings[0]).toContain('无法读取文件信息')
+  })
+
+  it('emits import stages in order', async () => {
+    const file = join(root, '阶段.txt')
+    await writeFile(file, iconv.encode(makeBookText(1, 3), 'utf8'))
+    const stages: string[] = []
+
+    const queue = new ImportQueue(new ImportService(library, books))
+    await queue.importFiles([file], ({ stage }) => stages.push(stage))
+
+    expect(stages).toEqual(['reading', 'parsing', 'writing', 'done'])
   })
 })

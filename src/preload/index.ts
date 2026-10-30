@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { ReaderApi, SearchProgress } from '../shared/api'
 
 const api: ReaderApi = {
@@ -6,6 +6,8 @@ const api: ReaderApi = {
   libraryList: () => ipcRenderer.invoke('library:list'),
   removeBook: (id) => ipcRenderer.invoke('library:remove', id),
   chooseAndImport: () => ipcRenderer.invoke('library:choose-import'),
+  importPaths: (paths) => ipcRenderer.invoke('library:import-paths', paths),
+  pathForFile: (file) => webUtils.getPathForFile(file as File),
   debugImport: (paths) => ipcRenderer.invoke('debug:import', paths),
   onImportProgress: (callback) => {
     const listener = (_event: unknown, payload: { fileName: string; stage: string }): void => {
