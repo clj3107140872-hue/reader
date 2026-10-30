@@ -1,13 +1,32 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AppSettings } from '../../../core/model'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { AppSettings, BookMeta, BookProgress } from '../../../core/model'
 import type { OpenBookPayload } from '../../../shared/api'
 import type { SettingsPatch } from '../../../shared/settings'
+import ProgressBar from '../components/ProgressBar'
+import {
+  chapterIndexForPercent,
+  charsBefore,
+  percentAt,
+  resolveChapterIndex,
+  totalChars
+} from '../reader/position'
 
 interface ReaderProps {
   bookId: string
   settings: AppSettings
   onSettingsChange: (patch: SettingsPatch) => void
   onBack: () => void
+}
+
+interface ChapterView {
+  meta: BookMeta['chapters'][number]
+  paragraphs: string[]
+}
+
+interface CurrentPosition {
+  chapterIndex: number
+  paragraphIndex: number
+  percent: number
 }
 
 function splitParagraphs(text: string): string[] {
@@ -17,15 +36,47 @@ function splitParagraphs(text: string): string[] {
     .filter(Boolean)
 }
 
-export default function Reader({ bookId, onBack }: ReaderProps) {
+const ReaderBody = memo(function ReaderBody({ chapters }: { chapters: ChapterView[] }) {
+  return (
+    <article className="reader-page">
+      {chapters.map((chapter, chapterIndex) => (
+        <section
+          key={chapter.meta.index}
+          className={`reader-chapter ${chapter.meta.level}`}
+          data-chapter-section={chapterIndex}
+        >
+          <h2 className="chapter-title">{chapter.meta.title}</h2>
+          {chapter.paragraphs.map((text, paragraphIndex) => (
+            <p
+              key={paragraphIndex}
+              className="reader-paragraph"
+              data-chapter-index={chapterIndex}
+              data-paragraph-index={paragraphIndex}
+            >
+              {text}
+            </p>
+          ))}
+        </section>
+      ))}
+    </article>
+  )
+})
+
+export default function Reader({ bookId, settings, onBack }: ReaderProps) {
   const [book, setBook] = useState<OpenBookPayload | null>(null)
   const [error, setError] = useState('')
+  const [current, setCurrent] = useState<CurrentPosition>({ chapterIndex: 0, paragraphIndex: 0, percent: 0 })
   const scrollRef = useRef<HTMLElement | null>(null)
+  const restoredRef = useRef(false)
+  const rafRef = useRef(0)
+  const pendingRef = useRef<BookProgress | null>(null)
+  const timerRef = useRef<number | null>(null)
 
   useEffect(() => {
     let alive = true
     setBook(null)
     setError('')
+    restoredRef.current = false
     window.api
       .openBook(bookId)
       .then((payload) => {
@@ -39,13 +90,128 @@ export default function Reader({ bookId, onBack }: ReaderProps) {
     }
   }, [bookId])
 
-  const chapters = useMemo(() => {
+  const chapters = useMemo<ChapterView[]>(() => {
     if (!book) return []
     return book.meta.chapters.map((meta, index) => ({
       meta,
       paragraphs: splitParagraphs(book.chapters[index] ?? '')
     }))
   }, [book])
+
+  const paragraphs = useMemo(() => chapters.map((chapter) => chapter.paragraphs), [chapters])
+
+  const flush = useCallback((): void => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+    const pending = pendingRef.current
+    pendingRef.current = null
+    if (pending) void window.api.saveProgress(bookId, pending).catch(() => undefined)
+  }, [bookId])
+
+  const scheduleSave = useCallback(
+    (position: CurrentPosition): void => {
+      if (!book) return
+      pendingRef.current = {
+        chapterKey: book.meta.chapters[position.chapterIndex]?.titleHash ?? '',
+        chapterIndex: position.chapterIndex,
+        paragraphIndex: position.paragraphIndex,
+        percent: position.percent,
+        updatedAt: new Date().toISOString()
+      }
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current)
+      timerRef.current = window.setTimeout(flush, 500)
+    },
+    [book, flush]
+  )
+
+  const scrollToPosition = useCallback((chapterIndex: number, paragraphIndex: number): void => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    const paragraph = scroller.querySelector<HTMLElement>(
+      `[data-chapter-index="${chapterIndex}"][data-paragraph-index="${paragraphIndex}"]`
+    )
+    if (paragraph) {
+      paragraph.scrollIntoView({ block: 'start' })
+      return
+    }
+    const section = scroller.querySelector<HTMLElement>(`[data-chapter-section="${chapterIndex}"]`)
+    section?.scrollIntoView({ block: 'start' })
+  }, [])
+
+  const currentPosition = useCallback((): { chapterIndex: number; paragraphIndex: number } | null => {
+    const scroller = scrollRef.current
+    if (!scroller) return null
+    const rect = scroller.getBoundingClientRect()
+    const x = rect.left + rect.width / 2
+    const y = rect.top + 88
+
+    for (const element of document.elementsFromPoint(x, y)) {
+      const paragraph = element.closest<HTMLElement>('[data-paragraph-index]')
+      if (paragraph) {
+        return {
+          chapterIndex: Number(paragraph.dataset.chapterIndex),
+          paragraphIndex: Number(paragraph.dataset.paragraphIndex)
+        }
+      }
+      const section = element.closest<HTMLElement>('[data-chapter-section]')
+      if (section) {
+        return { chapterIndex: Number(section.dataset.chapterSection), paragraphIndex: 0 }
+      }
+    }
+
+    const sections = scroller.querySelectorAll<HTMLElement>('[data-chapter-section]')
+    let nearest = 0
+    sections.forEach((section, index) => {
+      if (section.getBoundingClientRect().top <= y) nearest = index
+    })
+    return { chapterIndex: nearest, paragraphIndex: 0 }
+  }, [])
+
+  const handleScroll = useCallback((): void => {
+    if (rafRef.current !== 0) return
+    rafRef.current = window.requestAnimationFrame(() => {
+      rafRef.current = 0
+      if (!book) return
+      const position = currentPosition()
+      if (!position) return
+      const percent = percentAt(book.meta, position.chapterIndex, position.paragraphIndex, paragraphs)
+      const next = { ...position, percent }
+      setCurrent(next)
+      scheduleSave(next)
+    })
+  }, [book, currentPosition, paragraphs, scheduleSave])
+
+  useEffect(() => {
+    if (!book || chapters.length === 0 || restoredRef.current) return
+    restoredRef.current = true
+    const saved = book.progress
+    const chapterIndex = saved
+      ? resolveChapterIndex(book.meta, saved.chapterKey, saved.chapterIndex)
+      : 0
+    const paragraphIndex = saved?.paragraphIndex ?? 0
+    const percent = percentAt(book.meta, chapterIndex, paragraphIndex, paragraphs)
+    const next = { chapterIndex, paragraphIndex, percent }
+    setCurrent(next)
+    scheduleSave(next)
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => scrollToPosition(chapterIndex, paragraphIndex))
+    })
+  }, [book, chapters.length, paragraphs, scheduleSave, scrollToPosition])
+
+  useEffect(() => {
+    return () => flush()
+  }, [flush])
+
+  const seek = (percent: number): void => {
+    if (!book) return
+    const chapterIndex = chapterIndexForPercent(book.meta, percent)
+    const next = { chapterIndex, paragraphIndex: 0, percent }
+    setCurrent(next)
+    scheduleSave(next)
+    scrollToPosition(chapterIndex, 0)
+  }
 
   if (error) {
     return (
@@ -60,6 +226,10 @@ export default function Reader({ bookId, onBack }: ReaderProps) {
     return <p className="loading">正在打开…</p>
   }
 
+  const total = totalChars(book.meta)
+  const read = charsBefore(book.meta, current.chapterIndex, current.paragraphIndex, paragraphs)
+  const remainingMinutes = Math.max(0, Math.ceil((total - read) / 400))
+
   return (
     <div className="reader">
       <header className="reader-toolbar">
@@ -71,29 +241,17 @@ export default function Reader({ bookId, onBack }: ReaderProps) {
         </span>
       </header>
 
-      <main className="reader-scroll" ref={scrollRef}>
-        <article className="reader-page">
-          {chapters.map((chapter, chapterIndex) => (
-            <section
-              key={chapter.meta.index}
-              className={`reader-chapter ${chapter.meta.level}`}
-              data-chapter-section={chapterIndex}
-            >
-              <h2 className="chapter-title">{chapter.meta.title}</h2>
-              {chapter.paragraphs.map((text, paragraphIndex) => (
-                <p
-                  key={paragraphIndex}
-                  className="reader-paragraph"
-                  data-chapter-index={chapterIndex}
-                  data-paragraph-index={paragraphIndex}
-                >
-                  {text}
-                </p>
-              ))}
-            </section>
-          ))}
-        </article>
+      <main className="reader-scroll" ref={scrollRef} onScroll={handleScroll}>
+        <ReaderBody chapters={chapters} />
       </main>
+
+      <ProgressBar
+        percent={current.percent}
+        chapterIndex={current.chapterIndex}
+        chapterCount={book.meta.chapters.length}
+        remainingMinutes={remainingMinutes}
+        onSeek={seek}
+      />
     </div>
   )
 }
