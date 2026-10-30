@@ -173,6 +173,57 @@ describe('MergeService', () => {
     const stored = await books.readProgress('a')
     expect(stored.progress?.percent).toBe(17)
     expect(stored.bookmarks.map((bookmark) => bookmark.id)).toEqual(['mark-a', 'mark-b'])
+    expect(stored.bookmarks.find((bookmark) => bookmark.id === 'mark-b')?.chapterIndex).toBe(3)
+  })
+
+  it('remaps bookmark and progress chapter indexes after a reorder', async () => {
+    await importVolume('a', '测试书_4-6章.txt', 4, 6)
+    await importVolume('b', '测试书_1-3章.txt', 1, 3)
+
+    const targetBook = await books.readBook('a')
+    const targetKey = targetBook.meta.chapters[0].titleHash
+    await books.writeProgress('a', {
+      progress: {
+        chapterKey: targetKey,
+        chapterIndex: 0,
+        paragraphIndex: 1,
+        percent: 17,
+        updatedAt: '2026-01-02T00:00:00.000Z'
+      },
+      bookmarks: [
+        {
+          id: 'mark-a',
+          chapterKey: targetKey,
+          chapterIndex: 0,
+          paragraphIndex: 1,
+          excerpt: '第四段',
+          createdAt: '2026-01-02T00:00:00.000Z'
+        }
+      ]
+    })
+
+    const sourceBook = await books.readBook('b')
+    const sourceKey = sourceBook.meta.chapters[0].titleHash
+    await books.writeProgress('b', {
+      progress: null,
+      bookmarks: [
+        {
+          id: 'mark-b',
+          chapterKey: sourceKey,
+          chapterIndex: 0,
+          paragraphIndex: 0,
+          excerpt: '第一段',
+          createdAt: '2026-01-03T00:00:00.000Z'
+        }
+      ]
+    })
+
+    await service.merge('a', 'b')
+
+    const stored = await books.readProgress('a')
+    expect(stored.progress?.chapterIndex).toBe(3)
+    expect(stored.bookmarks.find((bookmark) => bookmark.id === 'mark-a')?.chapterIndex).toBe(3)
+    expect(stored.bookmarks.find((bookmark) => bookmark.id === 'mark-b')?.chapterIndex).toBe(0)
   })
 
   it('deduplicates overlapping chapters from the source', async () => {

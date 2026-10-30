@@ -1,4 +1,11 @@
-import type { Bookmark, BookMeta, ImportStats, LibraryEntry } from '../../core/model'
+import type {
+  Bookmark,
+  BookMeta,
+  BookProgress,
+  ChapterMeta,
+  ImportStats,
+  LibraryEntry
+} from '../../core/model'
 import { buildBookDocuments } from '../../core/compose'
 import { dedupeCrossChapterParagraphs } from '../../core/dedupe'
 import { displayBookTitle, planMerge } from '../../core/sameBook'
@@ -21,6 +28,39 @@ function mergeBookmarks(target: Bookmark[], source: Bookmark[]): Bookmark[] {
     merged.push(bookmark)
   }
   return merged
+}
+
+/** Same rule as resolveChapterIndex in the reader: nearest chapter by title hash. */
+function remapChapterIndex(chapters: ChapterMeta[], chapterKey: string, fallback: number): number {
+  if (chapters.length === 0) return 0
+  const matches: number[] = []
+  chapters.forEach((chapter, index) => {
+    if (chapter.titleHash === chapterKey) matches.push(index)
+  })
+  if (matches.length > 0) {
+    return matches.reduce((best, index) =>
+      Math.abs(index - fallback) < Math.abs(best - fallback) ? index : best
+    )
+  }
+  return Math.min(Math.max(fallback, 0), chapters.length - 1)
+}
+
+function remapBookmark(bookmark: Bookmark, chapters: ChapterMeta[]): Bookmark {
+  return {
+    ...bookmark,
+    chapterIndex: remapChapterIndex(chapters, bookmark.chapterKey, bookmark.chapterIndex)
+  }
+}
+
+function remapProgress(
+  progress: BookProgress | null,
+  chapters: ChapterMeta[]
+): BookProgress | null {
+  if (!progress) return null
+  return {
+    ...progress,
+    chapterIndex: remapChapterIndex(chapters, progress.chapterKey, progress.chapterIndex)
+  }
 }
 
 function unique(values: string[]): string[] {
@@ -98,8 +138,13 @@ export class MergeService {
 
       const targetProgress = await this.books.readProgress(targetId)
       const sourceProgress = await this.books.readProgress(sourceId)
-      const progress = targetProgress.progress ?? sourceProgress.progress
-      const bookmarks = mergeBookmarks(targetProgress.bookmarks, sourceProgress.bookmarks)
+      const progress = remapProgress(
+        targetProgress.progress ?? sourceProgress.progress,
+        documents.meta.chapters
+      )
+      const bookmarks = mergeBookmarks(targetProgress.bookmarks, sourceProgress.bookmarks).map(
+        (bookmark) => remapBookmark(bookmark, documents.meta.chapters)
+      )
 
       await this.books.writeBook(documents)
       await this.books.writeProgress(targetId, { progress, bookmarks })
