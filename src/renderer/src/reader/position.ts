@@ -49,6 +49,43 @@ export function chapterIndexForPercent(meta: BookMeta, percent: number): number 
   return index
 }
 
+/** Index of the last top at or above `y`; 0 when none (or empty). */
+export function nearestIndexByTop(tops: number[], y: number): number {
+  let index = 0
+  for (let i = 0; i < tops.length; i++) {
+    if (tops[i] <= y) index = i
+  }
+  return index
+}
+
+/**
+ * Resolve a percent to a chapter and paragraph. The flow position of a percent
+ * is the paragraph whose character span contains the within-chapter offset.
+ */
+export function positionForPercent(
+  meta: BookMeta,
+  percent: number,
+  paragraphs: string[][]
+): { chapterIndex: number; paragraphIndex: number } {
+  const total = totalChars(meta)
+  if (total <= 0) return { chapterIndex: 0, paragraphIndex: 0 }
+  const clamped = Math.min(100, Math.max(0, percent))
+  const chapterIndex = chapterIndexForPercent(meta, clamped)
+  const chapter = meta.chapters[chapterIndex]
+  const starts = chapterCharStarts(meta)
+  const target = (clamped / 100) * total
+  const offset = Math.max(0, Math.min(chapter.charCount, target - starts[chapterIndex]))
+  const chapterParagraphs = paragraphs[chapterIndex] ?? []
+  if (chapterParagraphs.length === 0) return { chapterIndex, paragraphIndex: 0 }
+
+  let cumulative = 0
+  for (let i = 0; i < chapterParagraphs.length; i++) {
+    cumulative += chapterParagraphs[i].length
+    if (offset < cumulative) return { chapterIndex, paragraphIndex: i }
+  }
+  return { chapterIndex, paragraphIndex: chapterParagraphs.length - 1 }
+}
+
 export function resolveChapterIndex(meta: BookMeta, chapterKey: string, fallback: number): number {
   if (meta.chapters.length === 0) return 0
   const matches: number[] = []

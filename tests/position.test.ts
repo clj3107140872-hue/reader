@@ -4,7 +4,9 @@ import {
   chapterCharStarts,
   chapterIndexForPercent,
   charsBefore,
+  nearestIndexByTop,
   percentAt,
+  positionForPercent,
   resolveChapterIndex,
   totalChars
 } from '../src/renderer/src/reader/position'
@@ -23,7 +25,7 @@ function meta(): BookMeta {
   }
 }
 
-const paragraphs = [['12345', '12345'], ['12345']]
+const paragraphs = [['12345', '12345'], ['12345', '12345']]
 
 describe('reader position', () => {
   it('maps chapters to cumulative character offsets', () => {
@@ -67,5 +69,41 @@ describe('reader position', () => {
     expect(resolveChapterIndex(repeated, 'same', 0)).toBe(0)
     expect(resolveChapterIndex(repeated, 'same', 1)).toBe(1)
     expect(resolveChapterIndex(repeated, 'same', 2)).toBe(1)
+  })
+
+  it('finds the last top boundary at or above the probe point', () => {
+    expect(nearestIndexByTop([100, 200, 300], 50)).toBe(0)
+    expect(nearestIndexByTop([100, 200, 300], 150)).toBe(0)
+    expect(nearestIndexByTop([100, 200, 300], 250)).toBe(1)
+    expect(nearestIndexByTop([100, 200, 300], 400)).toBe(2)
+    expect(nearestIndexByTop([100, 200, 300], 100)).toBe(0)
+    expect(nearestIndexByTop([100, 200, 300], 300)).toBe(2)
+    expect(nearestIndexByTop([], 400)).toBe(0)
+  })
+
+  it('maps a percent inside a single chapter to a mid-chapter paragraph', () => {
+    const single: BookMeta = { ...meta(), chapters: [{ ...meta().chapters[0], charCount: 40 }] }
+    const chapterParagraphs = [
+      ['a'.repeat(10), 'b'.repeat(10), 'c'.repeat(10), 'd'.repeat(10)]
+    ]
+    expect(positionForPercent(single, 50, chapterParagraphs)).toEqual({
+      chapterIndex: 0,
+      paragraphIndex: 2
+    })
+  })
+
+  it('maps a percent inside the last chapter to a mid-chapter paragraph', () => {
+    expect(positionForPercent(meta(), 75, paragraphs)).toEqual({ chapterIndex: 1, paragraphIndex: 1 })
+  })
+
+  it('maps 100 percent to the last paragraph of the last chapter', () => {
+    expect(positionForPercent(meta(), 100, paragraphs)).toEqual({ chapterIndex: 1, paragraphIndex: 1 })
+  })
+
+  it('falls back to the first position for a book without characters', () => {
+    const empty: BookMeta = { ...meta(), chapters: [] }
+    expect(positionForPercent(empty, 50, [])).toEqual({ chapterIndex: 0, paragraphIndex: 0 })
+    const zeroChars: BookMeta = { ...meta(), chapters: [{ ...meta().chapters[0], charCount: 0 }] }
+    expect(positionForPercent(zeroChars, 50, [['x']])).toEqual({ chapterIndex: 0, paragraphIndex: 0 })
   })
 })

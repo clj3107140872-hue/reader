@@ -9,9 +9,10 @@ import SearchPanel from '../components/SearchPanel'
 import SettingsPanel from '../components/SettingsPanel'
 import TocDrawer from '../components/TocDrawer'
 import {
-  chapterIndexForPercent,
   charsBefore,
+  nearestIndexByTop,
   percentAt,
+  positionForPercent,
   resolveChapterIndex,
   totalChars
 } from '../reader/position'
@@ -39,6 +40,21 @@ function splitParagraphs(text: string): string[] {
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
+}
+
+/** Nearest paragraph inside a chapter section, measured against the probe line. */
+function positionInSection(
+  section: HTMLElement,
+  y: number
+): { chapterIndex: number; paragraphIndex: number } {
+  const chapterIndex = Number(section.dataset.chapterSection)
+  const paragraphElements = Array.from(
+    section.querySelectorAll<HTMLElement>('[data-paragraph-index]')
+  )
+  if (paragraphElements.length === 0) return { chapterIndex, paragraphIndex: 0 }
+  const tops = paragraphElements.map((element) => element.getBoundingClientRect().top)
+  const paragraph = paragraphElements[nearestIndexByTop(tops, y)]
+  return { chapterIndex, paragraphIndex: Number(paragraph.dataset.paragraphIndex) }
 }
 
 const ReaderBody = memo(function ReaderBody({ chapters }: { chapters: ChapterView[] }) {
@@ -173,17 +189,13 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
         }
       }
       const section = element.closest<HTMLElement>('[data-chapter-section]')
-      if (section) {
-        return { chapterIndex: Number(section.dataset.chapterSection), paragraphIndex: 0 }
-      }
+      if (section) return positionInSection(section, y)
     }
 
-    const sections = scroller.querySelectorAll<HTMLElement>('[data-chapter-section]')
-    let nearest = 0
-    sections.forEach((section, index) => {
-      if (section.getBoundingClientRect().top <= y) nearest = index
-    })
-    return { chapterIndex: nearest, paragraphIndex: 0 }
+    const sections = Array.from(scroller.querySelectorAll<HTMLElement>('[data-chapter-section]'))
+    if (sections.length === 0) return { chapterIndex: 0, paragraphIndex: 0 }
+    const tops = sections.map((section) => section.getBoundingClientRect().top)
+    return positionInSection(sections[nearestIndexByTop(tops, y)], y)
   }, [])
 
   const handleScroll = useCallback((): void => {
@@ -229,11 +241,12 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
 
   const seek = (percent: number): void => {
     if (!book) return
-    const chapterIndex = chapterIndexForPercent(book.meta, percent)
-    const next = { chapterIndex, paragraphIndex: 0, percent }
+    const { chapterIndex, paragraphIndex } = positionForPercent(book.meta, percent, paragraphs)
+    const applied = percentAt(book.meta, chapterIndex, paragraphIndex, paragraphs)
+    const next = { chapterIndex, paragraphIndex, percent: applied }
     setCurrent(next)
     scheduleSave(next)
-    scrollToPosition(chapterIndex, 0)
+    scrollToPosition(chapterIndex, paragraphIndex)
   }
 
   const jumpToChapter = useCallback(
