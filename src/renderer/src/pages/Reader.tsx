@@ -5,6 +5,7 @@ import type { OpenBookPayload } from '../../../shared/api'
 import type { SettingsPatch } from '../../../shared/settings'
 import ProgressBar from '../components/ProgressBar'
 import SettingsPanel from '../components/SettingsPanel'
+import TocDrawer from '../components/TocDrawer'
 import {
   chapterIndexForPercent,
   charsBefore,
@@ -67,7 +68,7 @@ const ReaderBody = memo(function ReaderBody({ chapters }: { chapters: ChapterVie
 export default function Reader({ bookId, settings, onSettingsChange, onBack }: ReaderProps) {
   const [book, setBook] = useState<OpenBookPayload | null>(null)
   const [error, setError] = useState('')
-  const [drawer, setDrawer] = useState<'settings' | null>(null)
+  const [drawer, setDrawer] = useState<'toc' | 'settings' | null>(null)
   const [current, setCurrent] = useState<CurrentPosition>({ chapterIndex: 0, paragraphIndex: 0, percent: 0 })
   const scrollRef = useRef<HTMLElement | null>(null)
   const restoredRef = useRef(false)
@@ -216,6 +217,21 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
     scrollToPosition(chapterIndex, 0)
   }
 
+  const jumpToChapter = useCallback(
+    (chapterIndex: number): void => {
+      if (!book) return
+      const index = Math.min(Math.max(chapterIndex, 0), book.meta.chapters.length - 1)
+      const position = { chapterIndex: index, paragraphIndex: 0, percent: 0 }
+      const percent = percentAt(book.meta, index, 0, paragraphs)
+      const next = { ...position, percent }
+      setCurrent(next)
+      scheduleSave(next)
+      scrollToPosition(index, 0)
+      setDrawer(null)
+    },
+    [book, paragraphs, scheduleSave, scrollToPosition]
+  )
+
   const readerStyle = {
     '--reader-font-family': settings.typography.fontFamily,
     '--reader-font-size': `${settings.typography.fontSize}px`,
@@ -253,6 +269,9 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
           {book.meta.title}
         </span>
         <span className="toolbar-spacer" />
+        <button className="ghost" onClick={() => setDrawer('toc')}>
+          目录
+        </button>
         <button className="ghost" onClick={() => setDrawer('settings')}>
           排版
         </button>
@@ -269,6 +288,15 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
         remainingMinutes={remainingMinutes}
         onSeek={seek}
       />
+
+      {drawer === 'toc' && (
+        <TocDrawer
+          chapters={book.meta.chapters}
+          currentIndex={current.chapterIndex}
+          onSelect={jumpToChapter}
+          onClose={() => setDrawer(null)}
+        />
+      )}
 
       {drawer === 'settings' && (
         <SettingsPanel
