@@ -18,6 +18,11 @@ if (!app.isPackaged) {
   app.commandLine.appendSwitch('remote-debugging-port', '9222')
 }
 
+// Development only: automated acceptance runs use an offscreen window and
+// must never touch the user's desktop or the real window state.
+const ACCEPTANCE = !app.isPackaged && process.env.READER_ACCEPTANCE === '1'
+let acceptanceFullscreen = false
+
 const dataDir = resolveDataDir()
 const library = new LibraryRepository(dataDir)
 const books = new BookRepository(dataDir)
@@ -55,33 +60,30 @@ async function importFiles(files: string[], win: BrowserWindow | null): Promise<
 }
 
 function createWindow(windowState: AppSettings['window']): void {
-  // Development only: automated acceptance runs must not take focus, appear
-  // on the desktop or leave a taskbar entry while they drive the UI.
-  const acceptance = !app.isPackaged && process.env.READER_ACCEPTANCE === '1'
   const win = new BrowserWindow({
     width: windowState.width,
     height: windowState.height,
-    x: acceptance ? -20000 : windowState.x,
-    y: acceptance ? -20000 : windowState.y,
-    show: !acceptance,
-    skipTaskbar: acceptance,
-    focusable: !acceptance,
+    x: ACCEPTANCE ? -20000 : windowState.x,
+    y: ACCEPTANCE ? -20000 : windowState.y,
+    show: !ACCEPTANCE,
+    skipTaskbar: ACCEPTANCE,
+    focusable: !ACCEPTANCE,
     minWidth: 800,
     minHeight: 600,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      offscreen: acceptance,
-      backgroundThrottling: !acceptance
+      offscreen: ACCEPTANCE,
+      backgroundThrottling: !ACCEPTANCE
     }
   })
-  if (acceptance) {
+  if (ACCEPTANCE) {
     win.webContents.setFrameRate(30)
   } else if (windowState.maximized) {
     win.maximize()
   }
-  if (!acceptance) {
+  if (!ACCEPTANCE) {
     win.on('close', () => {
       const bounds = win.getNormalBounds()
       settingsRepo.updateSync({ window: { ...bounds, maximized: win.isMaximized() } })
@@ -103,6 +105,12 @@ app.whenReady().then(async () => {
   ipcMain.handle('window:toggle-fullscreen', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return false
+    // Development only: an offscreen acceptance window must never be pulled
+    // onto the user's screen, so report a virtual toggle instead.
+    if (ACCEPTANCE) {
+      acceptanceFullscreen = !acceptanceFullscreen
+      return acceptanceFullscreen
+    }
     const next = !win.isFullScreen()
     win.setFullScreen(next)
     return next
