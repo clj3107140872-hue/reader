@@ -15,6 +15,10 @@ const api: ReaderApi = {
       ipcRenderer.removeListener('import:progress', listener)
     }
   },
+  openBook: (id) => ipcRenderer.invoke('book:open', id),
+  saveProgress: (id, progress) => ipcRenderer.invoke('progress:save', id, progress),
+  addBookmark: (id, bookmark) => ipcRenderer.invoke('bookmark:add', id, bookmark),
+  removeBookmark: (id, bookmarkId) => ipcRenderer.invoke('bookmark:remove', id, bookmarkId),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
   toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen')

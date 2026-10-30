@@ -1,11 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import type { OpenDialogOptions } from 'electron'
 import { basename, join } from 'node:path'
-import type { AppSettings } from '../core/model'
-import type { ImportSummary } from '../shared/api'
+import type { AppSettings, BookProgress } from '../core/model'
+import type { ImportSummary, NewBookmark } from '../shared/api'
 import type { SettingsPatch } from '../shared/settings'
 import { ImportService } from './services/import'
 import { resolveDataDir } from './services/paths'
+import { ReaderService } from './services/reader'
 import { BookRepository } from './storage/book'
 import { LibraryRepository } from './storage/library'
 import { SettingsRepository } from './storage/settings'
@@ -21,6 +22,7 @@ const library = new LibraryRepository(dataDir)
 const books = new BookRepository(dataDir)
 const importer = new ImportService(library, books)
 const settingsRepo = new SettingsRepository(dataDir)
+const reader = new ReaderService(library, books)
 
 async function importFiles(files: string[], win: BrowserWindow | null): Promise<ImportSummary> {
   let imported = 0
@@ -106,6 +108,16 @@ app.whenReady().then(async () => {
 
     return importFiles(selection.filePaths, win)
   })
+  ipcMain.handle('book:open', (_event, id: string) => reader.open(id))
+  ipcMain.handle('progress:save', (_event, id: string, progress: BookProgress) =>
+    reader.saveProgress(id, progress)
+  )
+  ipcMain.handle('bookmark:add', (_event, id: string, bookmark: NewBookmark) =>
+    reader.addBookmark(id, bookmark)
+  )
+  ipcMain.handle('bookmark:remove', (_event, id: string, bookmarkId: string) =>
+    reader.removeBookmark(id, bookmarkId)
+  )
 
   // Development only: lets automation import files without driving the native
   // dialog. Packaged builds do not register this handler.
