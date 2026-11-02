@@ -380,7 +380,11 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   }
 
   const dragging = useFileDrop((paths) => {
-    if (dialog || pendingMerge || selectionMode) return
+    if (selectionMode) {
+      notify('选择模式下不能导入，请先退出选择')
+      return
+    }
+    if (dialog || pendingMerge) return
     void importPaths(paths)
   })
 
