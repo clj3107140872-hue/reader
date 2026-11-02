@@ -62,7 +62,9 @@ export default function BookCard({
       >
         <div className="cover">{coverInitial(entry.title)}</div>
         <div className="meta">
-          <div className="title">{entry.title}</div>
+          <div className="title" title={selectable ? entry.title : undefined}>
+            {entry.title}
+          </div>
           <div className="sub">
             {entry.chapterCount} 章 · {entry.encoding}
           </div>

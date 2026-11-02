@@ -170,18 +170,16 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
       kept.length > 0
         ? `，保持原样 ${kept.length} 本：${kept.map((title) => `《${title}》`).join('、')}`
         : ''
-    if (failures.length > 0) {
-      notify(
-        `${BATCH_LABELS[kind]}完成 ${done} 本${keptText}，失败 ${failures.length} 本：${failures.join('；')}`
-      )
-    } else {
-      notify(`${BATCH_LABELS[kind]}完成，共 ${done} 本${keptText}`)
-    }
+    const summary =
+      failures.length > 0
+        ? `${BATCH_LABELS[kind]}完成 ${done} 本${keptText}，失败 ${failures.length} 本：${failures.join('；')}`
+        : `${BATCH_LABELS[kind]}完成，共 ${done} 本${keptText}`
+    notify(summary)
     if (kind === 'delete') exitSelection()
     try {
       await refresh()
     } catch (reason) {
-      notify(errorText(reason))
+      notify(`${summary}；书架刷新失败：${errorText(reason)}`)
     }
   }
 
@@ -189,11 +187,12 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     setMergeCandidates(remaining)
     if (remaining.length > 0) return
     const warnings = tally.warnings.length > 0 ? `；${tally.warnings.join('；')}` : ''
-    notify(
-      `判断合并完成：合并 ${tally.merged} 对、跳过 ${tally.skipped} 对、失败 ${tally.failed} 对${warnings}`
-    )
+    const summary = `判断合并完成：合并 ${tally.merged} 对、跳过 ${tally.skipped} 对、失败 ${tally.failed} 对${warnings}`
+    notify(summary)
     setMergeTally({ merged: 0, skipped: 0, failed: 0, warnings: [] })
-    void refresh().catch((reason) => notify(errorText(reason)))
+    void refresh().catch((reason) =>
+      notify(`${summary}；书架刷新失败：${errorText(reason)}`)
+    )
   }
 
   const findMerges = async (): Promise<void> => {
