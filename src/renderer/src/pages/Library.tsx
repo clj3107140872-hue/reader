@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { LibraryEntry } from '../../../core/model'
 import type { ImportSummary, ImportSuspect } from '../../../shared/api'
 import BookCard from '../components/BookCard'
+import BookInfo from '../components/BookInfo'
+import HoverCard from '../components/HoverCard'
 import Modal from '../components/Modal'
 import { useFileDrop } from '../hooks/useFileDrop'
 
@@ -26,11 +28,6 @@ const STAGE_LABELS: Record<string, string> = {
   done: '完成'
 }
 
-function formatTime(iso: string): string {
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString('zh-CN', { hour12: false })
-}
-
 function errorText(reason: unknown): string {
   const message = reason instanceof Error ? reason.message : String(reason)
   return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
@@ -53,9 +50,31 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
   const [mergeQueue, setMergeQueue] = useState<ImportSuspect[]>([])
+  const [hovered, setHovered] = useState<{ entry: LibraryEntry; rect: DOMRect } | null>(null)
+  const hoverTimer = useRef<number | null>(null)
   const busyRef = useRef(false)
 
   const notify = (text: string): void => setToast({ id: Date.now(), text })
+
+  const clearHoverTimer = (): void => {
+    if (hoverTimer.current !== null) {
+      window.clearTimeout(hoverTimer.current)
+      hoverTimer.current = null
+    }
+  }
+
+  const startHover = (entry: LibraryEntry, rect: DOMRect): void => {
+    clearHoverTimer()
+    hoverTimer.current = window.setTimeout(() => {
+      hoverTimer.current = null
+      setHovered({ entry, rect })
+    }, 350)
+  }
+
+  const endHover = (): void => {
+    clearHoverTimer()
+    setHovered(null)
+  }
 
   const refresh = async (): Promise<void> => {
     setEntries(await window.api.libraryList())
@@ -73,6 +92,19 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     const timer = window.setTimeout(() => setToast(null), 5000)
     return () => window.clearTimeout(timer)
   }, [toast])
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!hovered) return
+    const hide = (): void => setHovered(null)
+    window.addEventListener('scroll', hide, true)
+    return () => window.removeEventListener('scroll', hide, true)
+  }, [hovered])
 
   useEffect(() => {
     if (!menu) return
@@ -231,11 +263,14 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
             <BookCard
               key={entry.id}
               entry={entry}
+              onHoverStart={startHover}
+              onHoverEnd={endHover}
               onOpen={() => {
                 if (busyRef.current) {
                   notify('正在导入，请稍候')
                   return
                 }
+                endHover()
                 onOpen(entry.id)
               }}
               onMenu={(target, x, y) => {
@@ -243,11 +278,18 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
                   notify('正在导入，请稍候')
                   return
                 }
+                endHover()
                 setMenu({ entry: target, ...clampMenu(x, y) })
               }}
             />
           ))}
         </div>
+      )}
+
+      {hovered && (
+        <HoverCard anchor={hovered.rect}>
+          <BookInfo entry={hovered.entry} />
+        </HoverCard>
       )}
 
       {menu && (
@@ -320,23 +362,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
 
       {dialog?.kind === 'source' && (
         <Modal title="来源信息" onClose={() => setDialog(null)}>
-          <dl className="info-list">
-            <dt>书名</dt>
-            <dd>{dialog.entry.title}</dd>
-            <dt>源文件</dt>
-            <dd>{(dialog.entry.sourceFileNames ?? [dialog.entry.sourceFileName]).join('、')}</dd>
-            <dt>编码</dt>
-            <dd>{dialog.entry.encoding}</dd>
-            <dt>导入时间</dt>
-            <dd>{formatTime(dialog.entry.importedAt)}</dd>
-            <dt>章节</dt>
-            <dd>{dialog.entry.chapterCount} 章</dd>
-            <dt>清洗</dt>
-            <dd>
-              广告 {dialog.entry.stats.adLinesRemoved} 行 · 合并重复段{' '}
-              {dialog.entry.stats.duplicateParagraphsMerged} 处
-            </dd>
-          </dl>
+          <BookInfo entry={dialog.entry} />
         </Modal>
       )}
 

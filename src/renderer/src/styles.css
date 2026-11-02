@@ -553,3 +553,19 @@ body {
   color: #4a6741;
   pointer-events: none;
 }
+
+.hover-card {
+  position: fixed;
+  z-index: 50;
+  width: 300px;
+  padding: 12px 14px;
+  background: #fffdf8;
+  border: 1px solid #e2ddd2;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+.hover-card .info-list {
+  grid-template-columns: 64px 1fr;
+  font-size: 12px;
+}

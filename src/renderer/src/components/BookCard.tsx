@@ -1,19 +1,42 @@
+import { useRef } from 'react'
 import type { LibraryEntry } from '../../../core/model'
 
 interface BookCardProps {
   entry: LibraryEntry
   onOpen: () => void
   onMenu: (entry: LibraryEntry, x: number, y: number) => void
+  onHoverStart: (entry: LibraryEntry, rect: DOMRect) => void
+  onHoverEnd: () => void
 }
 
 function coverInitial(title: string): string {
   return title.trim().charAt(0) || '书'
 }
 
-export default function BookCard({ entry, onOpen, onMenu }: BookCardProps) {
+export default function BookCard({
+  entry,
+  onOpen,
+  onMenu,
+  onHoverStart,
+  onHoverEnd
+}: BookCardProps) {
+  const cardRef = useRef<HTMLElement>(null)
+
+  const hoverStart = (): void => {
+    const rect = cardRef.current?.getBoundingClientRect()
+    if (rect) onHoverStart(entry, rect)
+  }
+
   return (
     <article
+      ref={cardRef}
       className="card"
+      onMouseEnter={hoverStart}
+      onMouseLeave={onHoverEnd}
+      onFocus={hoverStart}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onHoverEnd()
+      }}
       onContextMenu={(event) => {
         event.preventDefault()
         onMenu(entry, event.clientX, event.clientY)
