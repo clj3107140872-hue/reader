@@ -1,6 +1,6 @@
 # Plan 4 验收记录（2026-11-02）
 
-- 测试：`npm test` 全绿，22 个测试文件、138 条用例全部通过
+- 测试：`npm test` 全绿，22 个测试文件、139 条用例全部通过
 - 类型检查：`npm run typecheck` 通过（无诊断输出）
 - 构建：`npm run build` 通过（main / preload / renderer 均构建成功）
 - 离屏验收：临时数据目录 `C:/Users/Administrator/AppData/Local/Temp/reader-plan4-acceptance`（`PORTABLE_EXECUTABLE_DIR` 指向其中 `data-root`），窗口位于屏幕外且不显示，未触碰仓库 `data/`（工作区无 data 目录）
@@ -12,3 +12,4 @@
 - 批量删除：删除剩余 1 本后书架归零，显示 `书架还是空的，点击右上角「导入 TXT」开始阅读。`，标题回到 `我的书架`（已退出选择模式）
 - 环境说明：工作区 `node_modules/electron` 缺少二进制，验收时用 `ELECTRON_EXEC_PATH` 指向主仓库已安装的 Electron 45.1.0，并清除 shell 继承的 `ELECTRON_RUN_AS_NODE=1`；应用数据全部写入上述临时目录
 - 未自动化的 UI：拖拽导入暂停的视觉反馈、合并队列跳过计数 —— 待用户手工确认
+- 最终修复轮后（1904f42）复跑同一离屏验收，全部通过。
