@@ -9,6 +9,14 @@ import { useFileDrop } from '../hooks/useFileDrop'
 
 type SortMode = 'recent' | 'imported' | 'title'
 
+type BatchKind = 'delete' | 'reclean' | 'resplit'
+
+const BATCH_LABELS: Record<BatchKind, string> = {
+  delete: '删除',
+  reclean: '重新清洗',
+  resplit: '重新切章'
+}
+
 type Dialog =
   | { kind: 'source'; entry: LibraryEntry }
   | { kind: 'delete'; entry: LibraryEntry }
@@ -53,6 +61,8 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   const [hovered, setHovered] = useState<{ entry: LibraryEntry; rect: DOMRect } | null>(null)
   const [selectionMode, setSelectionMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [batchConfirm, setBatchConfirm] = useState<BatchKind | null>(null)
+  const [batch, setBatch] = useState<{ kind: BatchKind; total: number; done: number } | null>(null)
   const hoverTimer = useRef<number | null>(null)
   const busyRef = useRef(false)
 
@@ -91,6 +101,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   }
 
   const toggleSelected = (id: string): void => {
+    if (actionBusy) return
     setSelected((current) => {
       const next = new Set(current)
       if (next.has(id)) next.delete(id)
@@ -103,6 +114,42 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
 
   const toggleSelectAll = (): void => {
     setSelected(allSelected ? new Set() : new Set(entries.map((entry) => entry.id)))
+  }
+
+  const selectedEntries = entries.filter((entry) => selected.has(entry.id))
+
+  const runBatch = async (kind: BatchKind): Promise<void> => {
+    const targets = selectedEntries
+    if (targets.length === 0) return
+    setBatchConfirm(null)
+    setActionBusy(true)
+    let done = 0
+    const failures: string[] = []
+
+    for (let index = 0; index < targets.length; index++) {
+      const entry = targets[index]
+      setBatch({ kind, total: targets.length, done: index + 1 })
+      try {
+        if (kind === 'delete') await window.api.removeBook(entry.id)
+        else if (kind === 'reclean') await window.api.recleanBook(entry.id)
+        else await window.api.resplitBook(entry.id)
+        done += 1
+      } catch (reason) {
+        failures.push(`《${entry.title}》：${errorText(reason)}`)
+      }
+    }
+
+    setBatch(null)
+    setActionBusy(false)
+    if (failures.length > 0) {
+      notify(
+        `${BATCH_LABELS[kind]}完成 ${done} 本，失败 ${failures.length} 本：${failures.join('；')}`
+      )
+    } else {
+      notify(`${BATCH_LABELS[kind]}完成，共 ${done} 本`)
+    }
+    if (kind === 'delete') exitSelection()
+    await refresh()
   }
 
   const refresh = async (): Promise<void> => {
@@ -148,12 +195,12 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     if (!selectionMode) return
     const handleKey = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
-      if (dialog || mergeQueue.length > 0) return
+      if (dialog || batchConfirm || mergeQueue.length > 0) return
       exitSelection()
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [selectionMode, dialog, mergeQueue.length])
+  }, [selectionMode, dialog, batchConfirm, mergeQueue.length])
 
   const applySummary = async (summary: ImportSummary): Promise<void> => {
     if (summary.canceled) return
@@ -303,7 +350,36 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
         </div>
       </header>
 
+      {selectionMode && (
+        <div className="batch-bar">
+          <button
+            disabled={selected.size === 0 || actionBusy}
+            onClick={() => setBatchConfirm('reclean')}
+          >
+            重新清洗
+          </button>
+          <button
+            disabled={selected.size === 0 || actionBusy}
+            onClick={() => setBatchConfirm('resplit')}
+          >
+            重新切章
+          </button>
+          <button
+            className="danger"
+            disabled={selected.size === 0 || actionBusy}
+            onClick={() => setBatchConfirm('delete')}
+          >
+            删除
+          </button>
+        </div>
+      )}
+
       {progress && <p className="hint">{progress}</p>}
+      {batch && (
+        <p className="hint">
+          {BATCH_LABELS[batch.kind]} 第 {batch.done}/{batch.total} 本
+        </p>
+      )}
       {toast && (
         <div className="toast" role="status">
           {toast.text}
@@ -331,6 +407,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
                   notify('正在导入，请稍候')
                   return
                 }
+                if (actionBusy) return
                 endHover()
                 onOpen(entry.id)
               }}
@@ -340,6 +417,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
                   notify('正在导入，请稍候')
                   return
                 }
+                if (actionBusy) return
                 endHover()
                 setMenu({ entry: target, ...clampMenu(x, y) })
               }}
@@ -500,6 +578,89 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
           <p>将重新识别源文件中的章节标题并切分《{dialog.entry.title}》。</p>
           <p className="modal-note">
             识别不到至少 3 个章节标题时会保持原样。原数据会自动备份，阅读进度和书签保留。
+          </p>
+        </Modal>
+      )}
+
+      {batchConfirm === 'delete' && (
+        <Modal
+          title="批量删除"
+          onClose={() => setBatchConfirm(null)}
+          footer={
+            <>
+              <button className="modal-button ghost" onClick={() => setBatchConfirm(null)}>
+                取消
+              </button>
+              <button
+                className="modal-button danger"
+                disabled={actionBusy}
+                onClick={() => void runBatch('delete')}
+              >
+                删除
+              </button>
+            </>
+          }
+        >
+          <p>
+            将删除 {selectedEntries.length} 本书：
+            {selectedEntries
+              .slice(0, 3)
+              .map((entry) => `《${entry.title}》`)
+              .join('、')}
+            {selectedEntries.length > 3 ? ' 等' : ''}。
+          </p>
+          <p className="modal-note">
+            会移除书架记录、软件内的书籍数据和备份；你导入的原始 TXT 文件不会被删除。
+          </p>
+        </Modal>
+      )}
+
+      {batchConfirm === 'reclean' && (
+        <Modal
+          title="批量重新清洗"
+          onClose={() => setBatchConfirm(null)}
+          footer={
+            <>
+              <button className="modal-button ghost" onClick={() => setBatchConfirm(null)}>
+                取消
+              </button>
+              <button
+                className="modal-button"
+                disabled={actionBusy}
+                onClick={() => void runBatch('reclean')}
+              >
+                重新清洗
+              </button>
+            </>
+          }
+        >
+          <p>将按当前内置清洗规则重新处理选中的 {selectedEntries.length} 本书。</p>
+          <p className="modal-note">原数据会自动备份，阅读进度和书签保留。</p>
+        </Modal>
+      )}
+
+      {batchConfirm === 'resplit' && (
+        <Modal
+          title="批量重新切章"
+          onClose={() => setBatchConfirm(null)}
+          footer={
+            <>
+              <button className="modal-button ghost" onClick={() => setBatchConfirm(null)}>
+                取消
+              </button>
+              <button
+                className="modal-button"
+                disabled={actionBusy}
+                onClick={() => void runBatch('resplit')}
+              >
+                重新切章
+              </button>
+            </>
+          }
+        >
+          <p>将重新识别源文件中的章节标题并切分选中的 {selectedEntries.length} 本书。</p>
+          <p className="modal-note">
+            识别不到至少 3 个章节标题的书会保持原样。原数据会自动备份，阅读进度和书签保留。
           </p>
         </Modal>
       )}
