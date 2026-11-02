@@ -10,6 +10,7 @@ import BookCard from '../components/BookCard'
 import BookInfo from '../components/BookInfo'
 import HoverCard from '../components/HoverCard'
 import Modal from '../components/Modal'
+import { errorText } from '../errors'
 import { useFileDrop } from '../hooks/useFileDrop'
 
 type SortMode = 'recent' | 'imported' | 'title'
@@ -45,11 +46,6 @@ const STAGE_LABELS: Record<string, string> = {
   parsing: '解析中',
   writing: '写入中',
   done: '完成'
-}
-
-function errorText(reason: unknown): string {
-  const message = reason instanceof Error ? reason.message : String(reason)
-  return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
 }
 
 function clampMenu(x: number, y: number): { x: number; y: number } {
