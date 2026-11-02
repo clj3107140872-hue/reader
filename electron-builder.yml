@@ -1,0 +1,15 @@
+appId: com.clj.reader
+productName: Reader
+directories:
+  output: dist
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+asar: true
+win:
+  target:
+    - target: portable
+      arch: x64
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}

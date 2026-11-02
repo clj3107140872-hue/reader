@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LibraryEntry } from '../../../core/model'
 import type {
+  BackupInfo,
   FindMergesResult,
   ImportSummary,
   ImportSuspect,
@@ -37,6 +38,20 @@ function limitedJoin(items: string[], limit = 3): string {
 
 function filesText(files: string[]): string {
   return files.length > 0 ? files.join('、') : '未知文件'
+}
+
+function backupReasonLabel(backup: BackupInfo): string {
+  if (backup.reason === 'merge') return '合并前'
+  if (backup.reason === 'reclean') return '重新清洗前'
+  if (backup.reason === 'resplit') return '重新切章前'
+  return '自动备份'
+}
+
+function backupTime(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleString('zh-CN', { hour12: false })
 }
 
 type Dialog =
@@ -89,6 +104,9 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   })
   const [findingMerges, setFindingMerges] = useState(false)
   const [mergeTotal, setMergeTotal] = useState(0)
+  const [backups, setBackups] = useState<BackupInfo[]>([])
+  const [backupConfirm, setBackupConfirm] = useState<string | null>(null)
+  const [backupBusy, setBackupBusy] = useState(false)
   const hoverTimer = useRef<number | null>(null)
   const busyRef = useRef(false)
 
@@ -299,6 +317,12 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
 
   useEffect(() => {
     void refresh()
+    void window.api
+      .getStartupNotice()
+      .then((notice) => {
+        if (notice.libraryRestored) notify('书库索引损坏，已从备份恢复')
+      })
+      .catch(() => {})
     return window.api.onImportProgress((payload) => {
       setProgress(`正在处理：${payload.fileName} · ${STAGE_LABELS[payload.stage] ?? payload.stage}`)
     })
@@ -445,6 +469,40 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     }
   }
 
+  const openSource = async (entry: LibraryEntry): Promise<void> => {
+    setDialog({ kind: 'source', entry })
+    setBackups([])
+    setBackupConfirm(null)
+    try {
+      setBackups(await window.api.listBackups(entry.id))
+    } catch (reason) {
+      setBackups([])
+      notify(`读取备份失败：${errorText(reason)}`)
+    }
+  }
+
+  const closeSource = (): void => {
+    if (backupBusy) return
+    setBackupConfirm(null)
+    setDialog(null)
+  }
+
+  const confirmRestore = async (entry: LibraryEntry, name: string): Promise<void> => {
+    if (backupBusy) return
+    setBackupBusy(true)
+    try {
+      const result = await window.api.restoreBackup(entry.id, name)
+      setBackupConfirm(null)
+      setDialog(null)
+      await refresh().catch(() => {})
+      notify(result.restoredSource ? '已恢复备份，被合并的源书也已恢复' : '已恢复到所选备份')
+    } catch (reason) {
+      notify(`恢复失败：${errorText(reason)}`)
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
   const confirmReprocess = async (
     entry: LibraryEntry,
     kind: 'reclean' | 'resplit'
@@ -474,6 +532,9 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
 
   const sorted = [...entries].sort(SORTERS[sort])
   const mergePosition = mergeTotal > 0 ? mergeTotal - mergeCandidates.length + 1 : 0
+  const confirmBackup = backupConfirm
+    ? backups.find((backup) => backup.name === backupConfirm)
+    : null
 
   return (
     <div className="app">
@@ -605,7 +666,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
           <div className="card-menu" style={{ left: menu.x, top: menu.y }} role="menu">
             <button
               onClick={() => {
-                setDialog({ kind: 'source', entry: menu.entry })
+                void openSource(menu.entry)
                 setMenu(null)
               }}
             >
@@ -723,8 +784,67 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
       )}
 
       {dialog?.kind === 'source' && (
-        <Modal title="来源信息" onClose={() => setDialog(null)}>
+        <Modal
+          title="来源信息"
+          onClose={closeSource}
+          footer={
+            <button className="modal-button" disabled={backupBusy} onClick={closeSource}>
+              关闭
+            </button>
+          }
+        >
           <BookInfo entry={dialog.entry} />
+          <h3 className="backup-heading">可恢复的备份</h3>
+          {backups.length === 0 ? (
+            <p className="modal-note">没有可恢复的备份。合并、重新清洗或重新切章后会自动留一份。</p>
+          ) : (
+            <ul className="backup-list">
+              {backups.map((backup) => (
+                <li key={backup.name}>
+                  <div>
+                    <strong>
+                      {backupReasonLabel(backup)}
+                      {backup.sourceTitle ? ` · 含《${backup.sourceTitle}》` : ''}
+                    </strong>
+                    <span>
+                      {backupTime(backup.createdAt)} · {backup.chapterCount} 章
+                    </span>
+                  </div>
+                  <button
+                    className="modal-button ghost"
+                    disabled={backupBusy}
+                    onClick={() => setBackupConfirm(backup.name)}
+                  >
+                    恢复
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {confirmBackup && (
+            <div className="backup-confirm">
+              <p>
+                恢复到 {backupTime(confirmBackup.createdAt)} 的备份？当前章节、进度和书签会被覆盖；
+                当前状态也会自动留一份备份。
+              </p>
+              <div className="backup-confirm-actions">
+                <button
+                  className="modal-button ghost"
+                  disabled={backupBusy}
+                  onClick={() => setBackupConfirm(null)}
+                >
+                  取消
+                </button>
+                <button
+                  className="modal-button danger"
+                  disabled={backupBusy}
+                  onClick={() => void confirmRestore(dialog.entry, confirmBackup.name)}
+                >
+                  {backupBusy ? '恢复中…' : '确认恢复'}
+                </button>
+              </div>
+            </div>
+          )}
         </Modal>
       )}
 

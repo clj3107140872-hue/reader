@@ -19,9 +19,24 @@ export class LibraryRepository {
 
   async list(): Promise<LibraryEntry[]> {
     const main = await readJson<LibraryFile>(this.file)
-    if (main?.entries) return main.entries
+    if (main && Array.isArray(main.entries)) return main.entries
     const backup = await readJson<LibraryFile>(`${this.file}.bak`)
-    return backup?.entries ?? []
+    return backup && Array.isArray(backup.entries) ? backup.entries : []
+  }
+
+  /**
+   * Restore `library.json` from its backup when the main file is missing or
+   * unreadable. Runs once at startup before the window lists the shelf.
+   */
+  async repair(): Promise<{ restored: boolean }> {
+    return this.runExclusive(async () => {
+      const main = await readJson<LibraryFile>(this.file)
+      if (main && Array.isArray(main.entries)) return { restored: false }
+      const backup = await readJson<LibraryFile>(`${this.file}.bak`)
+      if (!backup || !Array.isArray(backup.entries)) return { restored: false }
+      await atomicWriteJson(this.file, backup, false)
+      return { restored: true }
+    })
   }
 
   /** Runs a read-modify-write against the library without interleaving. */

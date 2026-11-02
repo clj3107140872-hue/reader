@@ -62,6 +62,25 @@ export interface ReprocessResult {
   warning?: string
 }
 
+export interface BackupInfo {
+  name: string
+  createdAt: string
+  chapterCount: number
+  reason: 'merge' | 'reclean' | 'resplit' | 'unknown'
+  sourceTitle?: string
+}
+
+export interface RestoreBackupResult {
+  id: string
+  chapterCount: number
+  restoredSource: boolean
+  warning?: string
+}
+
+export interface StartupNotice {
+  libraryRestored: boolean
+}
+
 export interface OpenBookPayload {
   meta: BookMeta
   chapters: string[]
@@ -113,6 +132,9 @@ export interface ReaderApi {
   removeBookmark(id: string, bookmarkId: string): Promise<Bookmark[]>
   findMerges(ids: string[]): Promise<FindMergesResult>
   mergeBooks(targetId: string, sourceId: string): Promise<MergeResult>
+  listBackups(id: string): Promise<BackupInfo[]>
+  restoreBackup(id: string, name: string): Promise<RestoreBackupResult>
+  getStartupNotice(): Promise<StartupNotice>
   recleanBook(id: string): Promise<ReprocessResult>
   resplitBook(id: string): Promise<ReprocessResult>
   searchBook(id: string, query: string, token: string): Promise<SearchResults>

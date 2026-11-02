@@ -71,6 +71,19 @@ describe('LibraryRepository', () => {
     expect((await library.list()).map((e) => e.id)).toEqual(['a'])
   })
 
+  it('writes the backup back when repairing a corrupt main index', async () => {
+    const library = new LibraryRepository(root)
+    await library.add(entry('a', '甲书'))
+    await library.add(entry('b', '乙书'))
+    await writeFile(join(root, 'library.json'), '{ not valid json', 'utf8')
+
+    expect(await library.repair()).toEqual({ restored: true })
+
+    const repaired = JSON.parse(await readFile(join(root, 'library.json'), 'utf8'))
+    expect(repaired.entries.map((item: LibraryEntry) => item.id)).toEqual(['a'])
+    expect((await library.list()).map((item) => item.id)).toEqual(['a'])
+  })
+
   it('serializes concurrent additions without losing entries', async () => {
     const library = new LibraryRepository(root)
     await Promise.all(
@@ -124,6 +137,28 @@ describe('BookRepository', () => {
     const backups = await readdir(join(root, 'books', 'book-1', 'backup'))
     expect(backups.length).toBe(1)
     expect(await books.readSource('book-1')).toBe('新的原文')
+  })
+
+  it('keeps older backups flat after several rewrites', async () => {
+    const books = new BookRepository(root)
+    const files: BookFiles = {
+      meta: meta('book-5'),
+      sourceText: '第一次',
+      chapters: [
+        { title: '第一章', level: 'chapter', startLine: 0, paragraphs: ['第一段。'] },
+        { title: '第二章', level: 'chapter', startLine: 1, paragraphs: ['第二段。'] }
+      ]
+    }
+    await books.writeBook(files)
+    await books.writeBook({ ...files, sourceText: '第二次' })
+    await books.writeBook({ ...files, sourceText: '第三次' })
+
+    const backupRoot = join(root, 'books', 'book-5', 'backup')
+    const backups = await readdir(backupRoot)
+    expect(backups).toHaveLength(2)
+    for (const name of backups) {
+      expect(await readFile(join(backupRoot, name, 'meta.json'), 'utf8')).toContain('book-5')
+    }
   })
 
   it('reads and writes progress with bookmarks', async () => {

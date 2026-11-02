@@ -20,7 +20,7 @@ export class ReprocessService {
     return this.library.runExclusive(async () => {
       const book = await this.load(id)
       const chapters = chaptersFromLines(book.sourceText, book.meta)
-      return this.commit(id, book, chapters)
+      return this.commit(id, book, chapters, 'reclean')
     })
   }
 
@@ -41,7 +41,7 @@ export class ReprocessService {
           warning: '没有识别到至少 3 个章节标题，已保持原样'
         }
       }
-      return this.commit(id, book, split.chapters)
+      return this.commit(id, book, split.chapters, 'resplit')
     })
   }
 
@@ -54,12 +54,16 @@ export class ReprocessService {
   private async commit(
     id: string,
     book: BookFiles,
-    chapters: CleanedChapter[]
+    chapters: CleanedChapter[],
+    reason: 'reclean' | 'resplit'
   ): Promise<ReprocessResult> {
     const cleaned = cleanChapters(chapters, [...BUILTIN_AD_RULES, ...this.userRules()])
     if (cleaned.chapters.every((chapter) => chapter.paragraphs.length === 0)) {
       throw new Error('重新清洗后没有可阅读的正文，已取消')
     }
+
+    const entry = (await this.library.list()).find((item) => item.id === id)
+    if (!entry) throw new Error('找不到这本书，可能已被删除')
 
     const documents = buildBookDocuments({
       id,
@@ -78,7 +82,14 @@ export class ReprocessService {
     }
 
     const progress = await this.books.readProgress(id)
-    await this.books.writeBook(documents)
+    const { backupDir } = await this.books.writeBook(documents)
+    if (backupDir) {
+      try {
+        await this.books.annotateBackup(backupDir, { reason, targetEntry: entry })
+      } catch {
+        // The backup is still restorable; only its label is missing.
+      }
+    }
     await this.books.writeProgress(id, progress)
     await this.library.save(
       (await this.library.list()).map((entry) =>

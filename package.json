@@ -1,15 +1,14 @@
 {
   "name": "reader",
   "version": "0.1.0",
-  "description": "",
+  "description": "离线 TXT 阅读器",
   "main": "./out/main/index.js",
-  "directories": {
-    "doc": "docs"
-  },
   "scripts": {
     "test": "vitest run",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder --win portable",
     "typecheck": "tsc --noEmit"
   },
   "repository": {
@@ -33,6 +32,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

@@ -542,6 +542,30 @@ body {
 .info-list dt { color: #6b6b6b; }
 .info-list dd { margin: 0; overflow-wrap: anywhere; }
 
+.backup-heading { margin: 16px 0 8px; font-size: 13px; color: #4a4a4a; }
+.backup-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.backup-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid #e2ddd2;
+  border-radius: 6px;
+}
+.backup-list li div { display: grid; gap: 2px; }
+.backup-list li span { color: #6b6b6b; font-size: 12px; }
+.backup-list .modal-button { padding: 5px 12px; white-space: nowrap; }
+.backup-confirm {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2c9a0;
+  background: #fff8ea;
+  border-radius: 6px;
+}
+.backup-confirm p { margin: 0 0 8px; font-size: 13px; }
+.backup-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
 .drop-overlay {
   position: fixed;
   inset: 12px;

@@ -155,7 +155,8 @@ export class MergeService {
         (bookmark) => remapBookmark(bookmark, documents.meta.chapters)
       )
 
-      await this.books.writeBook(documents)
+      await this.books.createMergeRestorePoint(targetId, sourceId, target, source)
+      await this.books.writeBook(documents, { backup: false })
       await this.books.writeProgress(targetId, { progress, bookmarks })
 
       const nextEntries = entries
