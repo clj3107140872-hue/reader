@@ -70,6 +70,45 @@ async function seed(id: string, title: string): Promise<void> {
   await library.add(entry(id, title))
 }
 
+function chapterMetas(id: string, count: number): BookMeta['chapters'] {
+  return Array.from({ length: count }, (_, index) => ({
+    index,
+    title: `第${index + 1}章`,
+    level: 'chapter' as const,
+    titleHash: `${id}-h${index}`,
+    startLine: index,
+    charCount: 3,
+    simhash: '1',
+    flags: {}
+  }))
+}
+
+async function seedBook(
+  id: string,
+  title: string,
+  normalizedTitle: string,
+  chapterCount: number,
+  importedAt: string
+): Promise<void> {
+  const chapters = chapterMetas(id, chapterCount)
+  await books.writeBook({
+    meta: { ...meta(id, title), chapters },
+    sourceText: '',
+    chapters: chapters.map((chapter) => ({
+      title: chapter.title,
+      level: chapter.level,
+      startLine: chapter.startLine,
+      paragraphs: [`${title}正文。`]
+    }))
+  })
+  await library.add({
+    ...entry(id, title),
+    normalizedTitle,
+    importedAt,
+    chapterCount
+  })
+}
+
 describe('LibraryService', () => {
   it('removes the entry and the book files', async () => {
     await seed('book-1', '甲书')
@@ -94,5 +133,61 @@ describe('LibraryService', () => {
 
   it('rejects an invalid id', async () => {
     await expect(service.remove('../escape')).rejects.toThrow('无效的书籍编号')
+  })
+
+  it('finds books with the same normalized title and keeps the longer one', async () => {
+    await seedBook('book-1', '分卷书', '分卷书', 1, '2026-01-01T00:00:00.000Z')
+    await seedBook('book-2', '分卷书', '分卷书', 3, '2026-01-02T00:00:00.000Z')
+
+    const result = await service.findMerges(['book-1', 'book-2'])
+
+    expect(result.warnings).toEqual([])
+    expect(result.candidates).toEqual([
+      {
+        targetId: 'book-2',
+        targetTitle: '分卷书',
+        sourceId: 'book-1',
+        sourceTitle: '分卷书',
+        overlap: 0
+      }
+    ])
+  })
+
+  it('prefers the earlier import when chapter counts are equal', async () => {
+    await seedBook('book-1', '同书', '同书', 2, '2026-01-02T00:00:00.000Z')
+    await seedBook('book-2', '同书', '同书', 2, '2026-01-01T00:00:00.000Z')
+
+    const result = await service.findMerges(['book-1', 'book-2'])
+
+    expect(result.candidates[0]).toMatchObject({ targetId: 'book-2', sourceId: 'book-1' })
+  })
+
+  it('returns no candidates for unrelated books', async () => {
+    await seedBook('book-1', '甲书', '甲书', 2, '2026-01-01T00:00:00.000Z')
+    await seedBook('book-2', '乙书', '乙书', 2, '2026-01-02T00:00:00.000Z')
+
+    const result = await service.findMerges(['book-1', 'book-2'])
+
+    expect(result.candidates).toEqual([])
+  })
+
+  it('returns empty candidates for fewer than two books', async () => {
+    await seedBook('book-1', '甲书', '甲书', 2, '2026-01-01T00:00:00.000Z')
+
+    const result = await service.findMerges(['book-1'])
+
+    expect(result.candidates).toEqual([])
+    expect(result.warnings).toEqual([])
+  })
+
+  it('skips a book whose files are missing', async () => {
+    await seedBook('book-1', '甲书', '甲书', 2, '2026-01-01T00:00:00.000Z')
+    await library.add(entry('book-2', '乙书'))
+
+    const result = await service.findMerges(['book-1', 'book-2', 'missing'])
+
+    expect(result.candidates).toEqual([])
+    expect(result.warnings).toContain('《乙书》数据缺失，已跳过')
+    expect(result.warnings).toContain('有 1 本书已不在书架，已跳过')
   })
 })

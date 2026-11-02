@@ -121,6 +121,12 @@ app.whenReady().then(async () => {
     return next
   })
   ipcMain.handle('library:list', () => library.list())
+  ipcMain.handle('library:find-merges', (_event, ids: unknown) => {
+    const safeIds = Array.isArray(ids)
+      ? ids.filter((id): id is string => typeof id === 'string')
+      : []
+    return libraryService.findMerges(safeIds)
+  })
   ipcMain.handle('library:choose-import', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: OpenDialogOptions = {

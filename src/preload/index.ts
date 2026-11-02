@@ -22,6 +22,7 @@ const api: ReaderApi = {
   saveProgress: (id, progress) => ipcRenderer.invoke('progress:save', id, progress),
   addBookmark: (id, bookmark) => ipcRenderer.invoke('bookmark:add', id, bookmark),
   removeBookmark: (id, bookmarkId) => ipcRenderer.invoke('bookmark:remove', id, bookmarkId),
+  findMerges: (ids) => ipcRenderer.invoke('library:find-merges', ids),
   mergeBooks: (targetId, sourceId) => ipcRenderer.invoke('import:resolve', targetId, sourceId),
   recleanBook: (id) => ipcRenderer.invoke('book:reclean', id),
   resplitBook: (id) => ipcRenderer.invoke('book:resplit', id),

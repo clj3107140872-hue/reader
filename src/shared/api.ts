@@ -25,6 +25,20 @@ export interface ImportSummary {
   canceled?: boolean
 }
 
+export interface MergeCandidate {
+  targetId: string
+  targetTitle: string
+  sourceId: string
+  sourceTitle: string
+  /** Chapter overlap ratio, 0..1. */
+  overlap: number
+}
+
+export interface FindMergesResult {
+  candidates: MergeCandidate[]
+  warnings: string[]
+}
+
 export interface MergeResult {
   targetId: string
   title: string
@@ -89,6 +103,7 @@ export interface ReaderApi {
   saveProgress(id: string, progress: BookProgress): Promise<void>
   addBookmark(id: string, bookmark: NewBookmark): Promise<Bookmark[]>
   removeBookmark(id: string, bookmarkId: string): Promise<Bookmark[]>
+  findMerges(ids: string[]): Promise<FindMergesResult>
   mergeBooks(targetId: string, sourceId: string): Promise<MergeResult>
   recleanBook(id: string): Promise<ReprocessResult>
   resplitBook(id: string): Promise<ReprocessResult>
