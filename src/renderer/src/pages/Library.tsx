@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LibraryEntry } from '../../../core/model'
-import type { ImportSummary, ImportSuspect } from '../../../shared/api'
+import type {
+  FindMergesResult,
+  ImportSummary,
+  ImportSuspect,
+  MergeCandidate
+} from '../../../shared/api'
 import BookCard from '../components/BookCard'
 import BookInfo from '../components/BookInfo'
 import HoverCard from '../components/HoverCard'
@@ -8,6 +13,12 @@ import Modal from '../components/Modal'
 import { useFileDrop } from '../hooks/useFileDrop'
 
 type SortMode = 'recent' | 'imported' | 'title'
+
+interface MergeTally {
+  merged: number
+  skipped: number
+  failed: number
+}
 
 type BatchKind = 'delete' | 'reclean' | 'resplit'
 
@@ -63,6 +74,8 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [batchConfirm, setBatchConfirm] = useState<BatchKind | null>(null)
   const [batch, setBatch] = useState<{ kind: BatchKind; total: number; done: number } | null>(null)
+  const [mergeCandidates, setMergeCandidates] = useState<MergeCandidate[]>([])
+  const [mergeTally, setMergeTally] = useState<MergeTally>({ merged: 0, skipped: 0, failed: 0 })
   const hoverTimer = useRef<number | null>(null)
   const busyRef = useRef(false)
 
@@ -98,6 +111,8 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   const exitSelection = (): void => {
     setSelectionMode(false)
     setSelected(new Set())
+    setMergeCandidates([])
+    setMergeTally({ merged: 0, skipped: 0, failed: 0 })
   }
 
   const toggleSelected = (id: string): void => {
@@ -152,6 +167,78 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     await refresh()
   }
 
+  const finishMerge = (remaining: MergeCandidate[], tally: MergeTally): void => {
+    setMergeCandidates(remaining)
+    if (remaining.length > 0) return
+    notify(
+      `判断合并完成：合并 ${tally.merged} 对、跳过 ${tally.skipped} 对、失败 ${tally.failed} 对`
+    )
+    setMergeTally({ merged: 0, skipped: 0, failed: 0 })
+    void refresh()
+  }
+
+  const findMerges = async (): Promise<void> => {
+    if (selected.size < 2) {
+      notify('请至少勾选 2 本书')
+      return
+    }
+    setActionBusy(true)
+    try {
+      const result: FindMergesResult = await window.api.findMerges([...selected])
+      if (result.warnings.length > 0) notify(result.warnings.join('；'))
+      if (result.candidates.length === 0) {
+        if (result.warnings.length === 0) notify('没有发现可能是同一本书的候选')
+        return
+      }
+      setMergeTally({ merged: 0, skipped: 0, failed: 0 })
+      setMergeCandidates(result.candidates)
+    } catch (reason) {
+      notify(`判断合并失败：${errorText(reason)}`)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const skipCandidate = (): void => {
+    if (mergeCandidates.length === 0) return
+    const tally = { ...mergeTally, skipped: mergeTally.skipped + 1 }
+    setMergeTally(tally)
+    finishMerge(mergeCandidates.slice(1), tally)
+  }
+
+  const confirmCandidate = async (): Promise<void> => {
+    const candidate = mergeCandidates[0]
+    if (!candidate) return
+    setActionBusy(true)
+    try {
+      const existing = new Set((await window.api.libraryList()).map((entry) => entry.id))
+      if (!existing.has(candidate.targetId) || !existing.has(candidate.sourceId)) {
+        notify(`《${candidate.targetTitle}》或《${candidate.sourceTitle}》已不在书架，已跳过这一对`)
+        const tally = { ...mergeTally, skipped: mergeTally.skipped + 1 }
+        setMergeTally(tally)
+        finishMerge(mergeCandidates.slice(1), tally)
+        return
+      }
+
+      await window.api.mergeBooks(candidate.targetId, candidate.sourceId)
+      setSelected((current) => {
+        const next = new Set(current)
+        next.delete(candidate.sourceId)
+        return next
+      })
+      const tally = { ...mergeTally, merged: mergeTally.merged + 1 }
+      setMergeTally(tally)
+      finishMerge(mergeCandidates.slice(1), tally)
+    } catch (reason) {
+      notify(`合并失败：${errorText(reason)}`)
+      const tally = { ...mergeTally, failed: mergeTally.failed + 1 }
+      setMergeTally(tally)
+      finishMerge(mergeCandidates.slice(1), tally)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
   const refresh = async (): Promise<void> => {
     setEntries(await window.api.libraryList())
   }
@@ -195,12 +282,12 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     if (!selectionMode) return
     const handleKey = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
-      if (dialog || batchConfirm || mergeQueue.length > 0) return
+      if (dialog || mergeQueue.length > 0 || batchConfirm || mergeCandidates.length > 0) return
       exitSelection()
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [selectionMode, dialog, batchConfirm, mergeQueue.length])
+  }, [selectionMode, dialog, batchConfirm, mergeQueue.length, mergeCandidates.length])
 
   const applySummary = async (summary: ImportSummary): Promise<void> => {
     if (summary.canceled) return
@@ -352,6 +439,9 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
 
       {selectionMode && (
         <div className="batch-bar">
+          <button disabled={selected.size === 0 || actionBusy} onClick={() => void findMerges()}>
+            判断合并
+          </button>
           <button
             disabled={selected.size === 0 || actionBusy}
             onClick={() => setBatchConfirm('reclean')}
@@ -495,6 +585,36 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
           <p>
             《{pendingMerge.sourceTitle}》与《{pendingMerge.title}》有{' '}
             {(pendingMerge.overlap * 100).toFixed(0)}% 的章节内容重叠，可能是一本书的不同分卷。
+          </p>
+          <p className="modal-note">合并后会保留阅读进度和书签，并自动备份原书数据。</p>
+        </Modal>
+      )}
+
+      {mergeCandidates[0] && (
+        <Modal
+          title="判断合并"
+          onClose={skipCandidate}
+          footer={
+            <>
+              <button className="modal-button ghost" disabled={actionBusy} onClick={skipCandidate}>
+                跳过
+              </button>
+              <button
+                className="modal-button"
+                disabled={actionBusy}
+                onClick={() => void confirmCandidate()}
+              >
+                {actionBusy ? '合并中…' : `合并到《${mergeCandidates[0].targetTitle}》`}
+              </button>
+            </>
+          }
+        >
+          <p>
+            《{mergeCandidates[0].targetTitle}》 ⇄ 《{mergeCandidates[0].sourceTitle}》 · 章节重叠{' '}
+            {(mergeCandidates[0].overlap * 100).toFixed(0)}%
+          </p>
+          <p>
+            将《{mergeCandidates[0].sourceTitle}》合并到《{mergeCandidates[0].targetTitle}》。
           </p>
           <p className="modal-note">合并后会保留阅读进度和书签，并自动备份原书数据。</p>
         </Modal>
