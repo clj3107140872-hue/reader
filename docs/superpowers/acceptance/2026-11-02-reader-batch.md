@@ -3,8 +3,8 @@
 - 测试：`npm test` 全绿，22 个测试文件、139 条用例全部通过
 - 类型检查：`npm run typecheck` 通过（无诊断输出）
 - 构建：`npm run build` 通过（main / preload / renderer 均构建成功）
-- 离屏验收：临时数据目录 `C:/Users/Administrator/AppData/Local/Temp/reader-plan4-acceptance`（`PORTABLE_EXECUTABLE_DIR` 指向其中 `data-root`），窗口位于屏幕外且不显示，未触碰仓库 `data/`（工作区无 data 目录）
-- 悬停：浮层显示完整书名 `验收书C` 与源文件 `验收书C.txt`（另含章数、编码、阅读、清洗、导入时间）；快速划过（mouseover→mouseout）450ms 后无残留浮层
+- 离屏验收：临时数据目录 `C:/Users/Administrator/AppData/Local/Temp/reader-plan4-acceptance`（`PORTABLE_EXECUTABLE_DIR` 指向其中 `data-root`），以 `READER_ACCEPTANCE=1` 离屏模式启动，未打开可见窗口，未触碰仓库 `data/`（工作区无 data 目录）
+- 悬停：浮层显示完整书名 `验收书C` 与源文件 `验收书C.txt`（另含章数、编码、阅读、清洗、导入时间）；快速划过（mouseout→mouseover→mouseout）450ms 后无残留浮层
 - 选择模式：复选框显示 3 个，标题为 `已选 0 本`，悬停浮层隐藏；拖拽导入暂停由 `useFileDrop` 的选择模式守卫实现，未做真实拖拽，待手工确认
 - 判断合并：夹具 A（3 章）与 B（5 章）识别为候选，弹窗显示 `《验收书B》 ⇄ 《验收书A》 · 章节重叠 100%`，目标为 B；合并后书架只剩 `验收书B`、`验收书C`，提示 `判断合并完成：合并 1 对、跳过 0 对、失败 0 对`，A 已移除
 - 批量重新清洗：全选 2 本，提示 `重新清洗完成，共 2 本`，卡片数仍为 2；直接删除 C 的书籍数据后再重洗，提示 `重新清洗完成 1 本，失败 1 本：《验收书C》：找不到这本书，可能已被删除`，B 继续处理成功
@@ -12,4 +12,5 @@
 - 批量删除：删除剩余 1 本后书架归零，显示 `书架还是空的，点击右上角「导入 TXT」开始阅读。`，标题回到 `我的书架`（已退出选择模式）
 - 环境说明：工作区 `node_modules/electron` 缺少二进制，验收时用 `ELECTRON_EXEC_PATH` 指向主仓库已安装的 Electron 45.1.0，并清除 shell 继承的 `ELECTRON_RUN_AS_NODE=1`；应用数据全部写入上述临时目录
 - 未自动化的 UI：拖拽导入暂停的视觉反馈、合并队列跳过计数 —— 待用户手工确认
-- 最终修复轮后（1904f42）复跑同一离屏验收，全部通过。
+- 脚本说明：首次运行因 toast 已消失而丢弃，并从干净 `data-root` 重跑；快速划过检查用 IIFE 包裹，避免 CDP 全局重复声明
+- 最终修复轮后（`b6131d8`）复跑同一离屏验收，全部通过。
