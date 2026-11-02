@@ -1,5 +1,5 @@
 import { parseChapterOrdinal } from './chapters'
-import type { BookMeta, ChapterMeta, CleanedChapter } from './model'
+import type { BookMeta, CleanedChapter } from './model'
 import { hammingBig, toBig, toHalfWidth } from './text'
 
 export interface MergeSource {
@@ -67,30 +67,40 @@ export function displayBookTitle(fileName: string): string {
   )
 }
 
-export function chapterMatchRate(base: BookMeta, other: BookMeta): number {
-  const eligible = (chapters: ChapterMeta[]): ChapterMeta[] =>
-    chapters.filter((chapter) => chapter.level !== 'volume' && chapter.charCount > 0)
-  const baseChapters = eligible(base.chapters)
-  const otherChapters = eligible(other.chapters)
-  const small = baseChapters.length <= otherChapters.length ? baseChapters : otherChapters
-  const large = baseChapters.length <= otherChapters.length ? otherChapters : baseChapters
-  if (small.length === 0) return 0
+export interface ChapterIndex {
+  count: number
+  byTitle: Map<string, bigint[]>
+}
 
-  const index = new Map<string, bigint[]>()
-  for (const chapter of large) {
-    const list = index.get(chapter.titleHash) ?? []
+export function indexChapters(meta: BookMeta): ChapterIndex {
+  const eligible = meta.chapters.filter(
+    (chapter) => chapter.level !== 'volume' && chapter.charCount > 0
+  )
+  const byTitle = new Map<string, bigint[]>()
+  for (const chapter of eligible) {
+    const list = byTitle.get(chapter.titleHash) ?? []
     list.push(toBig(chapter.simhash))
-    index.set(chapter.titleHash, list)
+    byTitle.set(chapter.titleHash, list)
   }
+  return { count: eligible.length, byTitle }
+}
 
+export function chapterMatchRateFromIndexes(a: ChapterIndex, b: ChapterIndex): number {
+  const [small, large] = a.count <= b.count ? [a, b] : [b, a]
+  if (small.count === 0) return 0
   let matched = 0
-  for (const chapter of small) {
-    const candidates = index.get(chapter.titleHash)
+  for (const [titleHash, fingerprints] of small.byTitle) {
+    const candidates = large.byTitle.get(titleHash)
     if (!candidates) continue
-    const fingerprint = toBig(chapter.simhash)
-    if (candidates.some((candidate) => hammingBig(candidate, fingerprint) <= 3)) matched++
+    for (const fingerprint of fingerprints) {
+      if (candidates.some((candidate) => hammingBig(candidate, fingerprint) <= 3)) matched++
+    }
   }
-  return matched / small.length
+  return matched / small.count
+}
+
+export function chapterMatchRate(base: BookMeta, other: BookMeta): number {
+  return chapterMatchRateFromIndexes(indexChapters(base), indexChapters(other))
 }
 
 export function shouldSuspectSameBook(

@@ -19,6 +19,7 @@ interface MergeTally {
   merged: number
   skipped: number
   failed: number
+  warnings: string[]
 }
 
 type BatchKind = 'delete' | 'reclean' | 'resplit'
@@ -71,7 +72,13 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   const [batchConfirm, setBatchConfirm] = useState<BatchKind | null>(null)
   const [batch, setBatch] = useState<{ kind: BatchKind; total: number; done: number } | null>(null)
   const [mergeCandidates, setMergeCandidates] = useState<MergeCandidate[]>([])
-  const [mergeTally, setMergeTally] = useState<MergeTally>({ merged: 0, skipped: 0, failed: 0 })
+  const [mergeTally, setMergeTally] = useState<MergeTally>({
+    merged: 0,
+    skipped: 0,
+    failed: 0,
+    warnings: []
+  })
+  const [findingMerges, setFindingMerges] = useState(false)
   const hoverTimer = useRef<number | null>(null)
   const busyRef = useRef(false)
 
@@ -108,7 +115,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     setSelectionMode(false)
     setSelected(new Set())
     setMergeCandidates([])
-    setMergeTally({ merged: 0, skipped: 0, failed: 0 })
+    setMergeTally({ merged: 0, skipped: 0, failed: 0, warnings: [] })
   }
 
   const toggleSelected = (id: string): void => {
@@ -136,14 +143,21 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     setActionBusy(true)
     let done = 0
     const failures: string[] = []
+    const kept: string[] = []
 
     for (let index = 0; index < targets.length; index++) {
       const entry = targets[index]
       setBatch({ kind, total: targets.length, done: index + 1 })
       try {
-        if (kind === 'delete') await window.api.removeBook(entry.id)
-        else if (kind === 'reclean') await window.api.recleanBook(entry.id)
-        else await window.api.resplitBook(entry.id)
+        if (kind === 'delete') {
+          await window.api.removeBook(entry.id)
+        } else {
+          const result =
+            kind === 'reclean'
+              ? await window.api.recleanBook(entry.id)
+              : await window.api.resplitBook(entry.id)
+          if (result.warning) kept.push(entry.title)
+        }
         done += 1
       } catch (reason) {
         failures.push(`《${entry.title}》：${errorText(reason)}`)
@@ -152,25 +166,34 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
 
     setBatch(null)
     setActionBusy(false)
+    const keptText =
+      kept.length > 0
+        ? `，保持原样 ${kept.length} 本：${kept.map((title) => `《${title}》`).join('、')}`
+        : ''
     if (failures.length > 0) {
       notify(
-        `${BATCH_LABELS[kind]}完成 ${done} 本，失败 ${failures.length} 本：${failures.join('；')}`
+        `${BATCH_LABELS[kind]}完成 ${done} 本${keptText}，失败 ${failures.length} 本：${failures.join('；')}`
       )
     } else {
-      notify(`${BATCH_LABELS[kind]}完成，共 ${done} 本`)
+      notify(`${BATCH_LABELS[kind]}完成，共 ${done} 本${keptText}`)
     }
     if (kind === 'delete') exitSelection()
-    await refresh()
+    try {
+      await refresh()
+    } catch (reason) {
+      notify(errorText(reason))
+    }
   }
 
   const finishMerge = (remaining: MergeCandidate[], tally: MergeTally): void => {
     setMergeCandidates(remaining)
     if (remaining.length > 0) return
+    const warnings = tally.warnings.length > 0 ? `；${tally.warnings.join('；')}` : ''
     notify(
-      `判断合并完成：合并 ${tally.merged} 对、跳过 ${tally.skipped} 对、失败 ${tally.failed} 对`
+      `判断合并完成：合并 ${tally.merged} 对、跳过 ${tally.skipped} 对、失败 ${tally.failed} 对${warnings}`
     )
-    setMergeTally({ merged: 0, skipped: 0, failed: 0 })
-    void refresh()
+    setMergeTally({ merged: 0, skipped: 0, failed: 0, warnings: [] })
+    void refresh().catch((reason) => notify(errorText(reason)))
   }
 
   const findMerges = async (): Promise<void> => {
@@ -179,23 +202,30 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
       return
     }
     setActionBusy(true)
+    setFindingMerges(true)
     try {
       const result: FindMergesResult = await window.api.findMerges([...selected])
-      if (result.warnings.length > 0) notify(result.warnings.join('；'))
       if (result.candidates.length === 0) {
-        if (result.warnings.length === 0) notify('没有发现可能是同一本书的候选')
+        notify(
+          result.warnings.length > 0
+            ? [...result.warnings, '没有发现可能是同一本书的候选'].join('；')
+            : '没有发现可能是同一本书的候选'
+        )
         return
       }
-      setMergeTally({ merged: 0, skipped: 0, failed: 0 })
+      if (result.warnings.length > 0) notify(result.warnings.join('；'))
+      setMergeTally({ merged: 0, skipped: 0, failed: 0, warnings: [] })
       setMergeCandidates(result.candidates)
     } catch (reason) {
       notify(`判断合并失败：${errorText(reason)}`)
     } finally {
+      setFindingMerges(false)
       setActionBusy(false)
     }
   }
 
   const skipCandidate = (): void => {
+    if (actionBusy) return
     if (mergeCandidates.length === 0) return
     const tally = { ...mergeTally, skipped: mergeTally.skipped + 1 }
     setMergeTally(tally)
@@ -216,13 +246,16 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
         return
       }
 
-      await window.api.mergeBooks(candidate.targetId, candidate.sourceId)
+      const result = await window.api.mergeBooks(candidate.targetId, candidate.sourceId)
       setSelected((current) => {
         const next = new Set(current)
         next.delete(candidate.sourceId)
         return next
       })
-      const tally = { ...mergeTally, merged: mergeTally.merged + 1 }
+      const warnings = result.warning
+        ? [...mergeTally.warnings, result.warning]
+        : mergeTally.warnings
+      const tally = { ...mergeTally, merged: mergeTally.merged + 1, warnings }
       setMergeTally(tally)
       finishMerge(mergeCandidates.slice(1), tally)
     } catch (reason) {
@@ -277,13 +310,14 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   useEffect(() => {
     if (!selectionMode) return
     const handleKey = (event: KeyboardEvent): void => {
+      if (actionBusy) return
       if (event.key !== 'Escape') return
       if (dialog || mergeQueue.length > 0 || batchConfirm || mergeCandidates.length > 0) return
       exitSelection()
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [selectionMode, dialog, batchConfirm, mergeQueue.length, mergeCandidates.length])
+  }, [selectionMode, actionBusy, dialog, batchConfirm, mergeQueue.length, mergeCandidates.length])
 
   const applySummary = async (summary: ImportSummary): Promise<void> => {
     if (summary.canceled) return
@@ -401,10 +435,10 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
         <div className="toolbar-actions">
           {selectionMode ? (
             <>
-              <button className="ghost" onClick={toggleSelectAll}>
+              <button className="ghost" onClick={toggleSelectAll} disabled={actionBusy}>
                 {allSelected ? '取消全选' : '全选'}
               </button>
-              <button className="ghost" onClick={exitSelection}>
+              <button className="ghost" onClick={exitSelection} disabled={actionBusy}>
                 退出选择
               </button>
             </>
@@ -436,7 +470,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
       {selectionMode && (
         <div className="batch-bar">
           <button disabled={selected.size === 0 || actionBusy} onClick={() => void findMerges()}>
-            判断合并
+            {findingMerges ? '判断中…' : '判断合并'}
           </button>
           <button
             disabled={selected.size === 0 || actionBusy}

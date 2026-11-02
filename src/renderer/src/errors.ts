@@ -2,7 +2,6 @@ const KNOWN_MESSAGES = [
   '无效的书籍编号',
   '找不到',
   '不能把一本书合并到它自己',
-  '书籍数据缺失',
   '没有识别到至少 3 个章节标题',
   '重新清洗后没有可阅读的正文'
 ]
@@ -16,6 +15,7 @@ export function errorText(reason: unknown): string {
     /^Error invoking remote method '[^']+': (?:Error: )?/,
     ''
   )
+  if (message.includes('书籍数据缺失')) return '书籍数据缺失'
   return KNOWN_MESSAGES.some((known) => message.includes(known))
     ? message
     : '操作失败，请稍后重试'

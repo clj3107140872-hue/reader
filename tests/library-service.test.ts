@@ -153,6 +153,45 @@ describe('LibraryService', () => {
     ])
   })
 
+  it('finds overlap when normalized titles differ', async () => {
+    const chapters = Array.from({ length: 3 }, (_, index) => ({
+      index,
+      title: `第${index + 1}章`,
+      level: 'chapter' as const,
+      titleHash: `shared-h${index}`,
+      startLine: index,
+      charCount: 3,
+      simhash: '1',
+      flags: {}
+    }))
+    const ids = ['book-1', 'book-2']
+    const titles = ['甲书', '乙书']
+    const importedAt = ['2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z']
+    for (let index = 0; index < ids.length; index++) {
+      await books.writeBook({
+        meta: { ...meta(ids[index], titles[index]), chapters },
+        sourceText: '',
+        chapters: chapters.map((chapter) => ({
+          title: chapter.title,
+          level: chapter.level,
+          startLine: chapter.startLine,
+          paragraphs: ['完全相同的正文内容。']
+        }))
+      })
+      await library.add({
+        ...entry(ids[index], titles[index]),
+        normalizedTitle: titles[index],
+        importedAt: importedAt[index],
+        chapterCount: 3
+      })
+    }
+
+    const result = await service.findMerges(['book-1', 'book-2'])
+
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]).toMatchObject({ overlap: 1 })
+  })
+
   it('prefers the earlier import when chapter counts are equal', async () => {
     await seedBook('book-1', '同书', '同书', 2, '2026-01-02T00:00:00.000Z')
     await seedBook('book-2', '同书', '同书', 2, '2026-01-01T00:00:00.000Z')

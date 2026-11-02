@@ -1,5 +1,5 @@
 import type { BookMeta, LibraryEntry } from '../../core/model'
-import { chapterMatchRate } from '../../core/sameBook'
+import { chapterMatchRateFromIndexes, indexChapters } from '../../core/sameBook'
 import type { FindMergesResult, MergeCandidate } from '../../shared/api'
 import { assertBookId } from '../bookId'
 import type { BookRepository } from '../storage/book'
@@ -60,12 +60,16 @@ export class LibraryService {
       }
     }
 
+    const indexed = books.map((book) => ({ ...book, index: indexChapters(book.meta) }))
     const candidates: MergeCandidate[] = []
-    for (let i = 0; i < books.length; i++) {
-      for (let j = i + 1; j < books.length; j++) {
-        const a = books[i]
-        const b = books[j]
-        const overlap = chapterMatchRate(a.meta, b.meta)
+    let checked = 0
+    for (let i = 0; i < indexed.length; i++) {
+      for (let j = i + 1; j < indexed.length; j++) {
+        const a = indexed[i]
+        const b = indexed[j]
+        const overlap = chapterMatchRateFromIndexes(a.index, b.index)
+        checked += 1
+        if (checked % 200 === 0) await new Promise<void>((resolve) => setImmediate(resolve))
         const sameTitle =
           Boolean(a.entry.normalizedTitle) && a.entry.normalizedTitle === b.entry.normalizedTitle
         if (!sameTitle && overlap < 0.05) continue
