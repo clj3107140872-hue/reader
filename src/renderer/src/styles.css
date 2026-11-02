@@ -580,6 +580,7 @@ body {
   top: 8px;
   left: 8px;
   z-index: 2;
+  pointer-events: none;
   width: 20px;
   height: 20px;
   border: 1px solid #cfc9bc;
