@@ -51,6 +51,8 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   const [actionBusy, setActionBusy] = useState(false)
   const [mergeQueue, setMergeQueue] = useState<ImportSuspect[]>([])
   const [hovered, setHovered] = useState<{ entry: LibraryEntry; rect: DOMRect } | null>(null)
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const hoverTimer = useRef<number | null>(null)
   const busyRef = useRef(false)
 
@@ -74,6 +76,33 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   const endHover = (): void => {
     clearHoverTimer()
     setHovered(null)
+  }
+
+  const enterSelection = (): void => {
+    endHover()
+    setMenu(null)
+    setSelectionMode(true)
+    setSelected(new Set())
+  }
+
+  const exitSelection = (): void => {
+    setSelectionMode(false)
+    setSelected(new Set())
+  }
+
+  const toggleSelected = (id: string): void => {
+    setSelected((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const allSelected = entries.length > 0 && entries.every((entry) => selected.has(entry.id))
+
+  const toggleSelectAll = (): void => {
+    setSelected(allSelected ? new Set() : new Set(entries.map((entry) => entry.id)))
   }
 
   const refresh = async (): Promise<void> => {
@@ -114,6 +143,17 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
   }, [menu])
+
+  useEffect(() => {
+    if (!selectionMode) return
+    const handleKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      if (dialog || mergeQueue.length > 0) return
+      exitSelection()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [selectionMode, dialog, mergeQueue.length])
 
   const applySummary = async (summary: ImportSummary): Promise<void> => {
     if (summary.canceled) return
@@ -177,7 +217,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   }
 
   const dragging = useFileDrop((paths) => {
-    if (dialog || pendingMerge) return
+    if (dialog || pendingMerge || selectionMode) return
     void importPaths(paths)
   })
 
@@ -227,21 +267,39 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   return (
     <div className="app">
       <header className="toolbar">
-        <h1>我的书架</h1>
+        <h1>{selectionMode ? `已选 ${selected.size} 本` : '我的书架'}</h1>
         <div className="toolbar-actions">
-          <select
-            className="sort-select"
-            value={sort}
-            onChange={(event) => setSort(event.target.value as SortMode)}
-            aria-label="排序方式"
-          >
-            <option value="recent">最近阅读</option>
-            <option value="imported">导入时间</option>
-            <option value="title">书名</option>
-          </select>
-          <button onClick={() => void handleImport()} disabled={busy}>
-            {busy ? '导入中…' : '导入 TXT'}
-          </button>
+          {selectionMode ? (
+            <>
+              <button className="ghost" onClick={toggleSelectAll}>
+                {allSelected ? '取消全选' : '全选'}
+              </button>
+              <button className="ghost" onClick={exitSelection}>
+                退出选择
+              </button>
+            </>
+          ) : (
+            <>
+              <select
+                className="sort-select"
+                value={sort}
+                onChange={(event) => setSort(event.target.value as SortMode)}
+                aria-label="排序方式"
+              >
+                <option value="recent">最近阅读</option>
+                <option value="imported">导入时间</option>
+                <option value="title">书名</option>
+              </select>
+              <button onClick={() => void handleImport()} disabled={busy}>
+                {busy ? '导入中…' : '导入 TXT'}
+              </button>
+              {entries.length > 0 && (
+                <button className="ghost" onClick={enterSelection}>
+                  选择
+                </button>
+              )}
+            </>
+          )}
         </div>
       </header>
 
@@ -251,7 +309,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
           {toast.text}
         </div>
       )}
-      {dragging && !dialog && !pendingMerge && (
+      {dragging && !dialog && !pendingMerge && !selectionMode && (
         <div className="drop-overlay">松开鼠标，导入 TXT</div>
       )}
 
@@ -265,6 +323,9 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
               entry={entry}
               onHoverStart={startHover}
               onHoverEnd={endHover}
+              selectable={selectionMode}
+              selected={selected.has(entry.id)}
+              onToggle={() => toggleSelected(entry.id)}
               onOpen={() => {
                 if (busyRef.current) {
                   notify('正在导入，请稍候')
@@ -274,6 +335,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
                 onOpen(entry.id)
               }}
               onMenu={(target, x, y) => {
+                if (selectionMode) return
                 if (busyRef.current) {
                   notify('正在导入，请稍候')
                   return

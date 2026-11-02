@@ -7,6 +7,9 @@ interface BookCardProps {
   onMenu: (entry: LibraryEntry, x: number, y: number) => void
   onHoverStart: (entry: LibraryEntry, rect: DOMRect) => void
   onHoverEnd: () => void
+  selectable?: boolean
+  selected?: boolean
+  onToggle?: () => void
 }
 
 function coverInitial(title: string): string {
@@ -18,11 +21,15 @@ export default function BookCard({
   onOpen,
   onMenu,
   onHoverStart,
-  onHoverEnd
+  onHoverEnd,
+  selectable = false,
+  selected = false,
+  onToggle
 }: BookCardProps) {
   const cardRef = useRef<HTMLElement>(null)
 
   const hoverStart = (): void => {
+    if (selectable) return
     const rect = cardRef.current?.getBoundingClientRect()
     if (rect) onHoverStart(entry, rect)
   }
@@ -30,7 +37,7 @@ export default function BookCard({
   return (
     <article
       ref={cardRef}
-      className="card"
+      className={`card${selectable ? ' selectable' : ''}${selected ? ' selected' : ''}`}
       onMouseEnter={hoverStart}
       onMouseLeave={onHoverEnd}
       onFocus={hoverStart}
@@ -39,10 +46,20 @@ export default function BookCard({
       }}
       onContextMenu={(event) => {
         event.preventDefault()
+        if (selectable) return
         onMenu(entry, event.clientX, event.clientY)
       }}
     >
-      <button className="card-open" onClick={onOpen}>
+      {selectable && (
+        <span className="card-check" aria-hidden="true">
+          {selected ? '✓' : ''}
+        </span>
+      )}
+      <button
+        className="card-open"
+        onClick={selectable ? onToggle : onOpen}
+        aria-pressed={selectable ? selected : undefined}
+      >
         <div className="cover">{coverInitial(entry.title)}</div>
         <div className="meta">
           <div className="title" title={entry.title}>
@@ -60,17 +77,19 @@ export default function BookCard({
           )}
         </div>
       </button>
-      <button
-        className="card-more"
-        aria-label={`管理《${entry.title}》`}
-        onClick={(event) => {
-          event.stopPropagation()
-          const rect = event.currentTarget.getBoundingClientRect()
-          onMenu(entry, rect.right, rect.bottom)
-        }}
-      >
-        ⋯
-      </button>
+      {!selectable && (
+        <button
+          className="card-more"
+          aria-label={`管理《${entry.title}》`}
+          onClick={(event) => {
+            event.stopPropagation()
+            const rect = event.currentTarget.getBoundingClientRect()
+            onMenu(entry, rect.right, rect.bottom)
+          }}
+        >
+          ⋯
+        </button>
+      )}
     </article>
   )
 }

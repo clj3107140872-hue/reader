@@ -569,3 +569,32 @@ body {
   grid-template-columns: 64px 1fr;
   font-size: 12px;
 }
+
+.toolbar button.ghost {
+  background: transparent;
+  color: #4a6741;
+  border: 1px solid #d8d3c8;
+}
+.card-check {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #cfc9bc;
+  border-radius: 4px;
+  background: #fff;
+  color: #fff;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: center;
+}
+.card.selected {
+  outline: 2px solid #4a6741;
+  outline-offset: -2px;
+}
+.card.selected .card-check {
+  background: #4a6741;
+  border-color: #4a6741;
+}
