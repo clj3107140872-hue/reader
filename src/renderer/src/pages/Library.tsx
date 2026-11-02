@@ -30,6 +30,15 @@ const BATCH_LABELS: Record<BatchKind, string> = {
   resplit: '重新切章'
 }
 
+function limitedJoin(items: string[], limit = 3): string {
+  if (items.length <= limit) return items.join('；')
+  return `${items.slice(0, limit).join('；')}；另 ${items.length - limit} 项`
+}
+
+function filesText(files: string[]): string {
+  return files.length > 0 ? files.join('、') : '未知文件'
+}
+
 type Dialog =
   | { kind: 'source'; entry: LibraryEntry }
   | { kind: 'delete'; entry: LibraryEntry }
@@ -79,6 +88,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     warnings: []
   })
   const [findingMerges, setFindingMerges] = useState(false)
+  const [mergeTotal, setMergeTotal] = useState(0)
   const hoverTimer = useRef<number | null>(null)
   const busyRef = useRef(false)
 
@@ -115,6 +125,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     setSelectionMode(false)
     setSelected(new Set())
     setMergeCandidates([])
+    setMergeTotal(0)
     setMergeTally({ merged: 0, skipped: 0, failed: 0, warnings: [] })
   }
 
@@ -139,6 +150,11 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   const runBatch = async (kind: BatchKind): Promise<void> => {
     const targets = selectedEntries
     if (targets.length === 0) return
+    if (busyRef.current) {
+      notify('正在导入，请稍候')
+      return
+    }
+    if (actionBusy) return
     setBatchConfirm(null)
     setActionBusy(true)
     let done = 0
@@ -168,11 +184,15 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     setActionBusy(false)
     const keptText =
       kept.length > 0
-        ? `，保持原样 ${kept.length} 本：${kept.map((title) => `《${title}》`).join('、')}`
+        ? `；保持原样 ${kept.length} 本：${limitedJoin(kept.map((title) => `《${title}》`))}`
+        : ''
+    const failureText =
+      failures.length > 0
+        ? `；失败 ${failures.length} 本：${limitedJoin(failures)}`
         : ''
     const summary =
       failures.length > 0
-        ? `${BATCH_LABELS[kind]}完成 ${done} 本${keptText}，失败 ${failures.length} 本：${failures.join('；')}`
+        ? `${BATCH_LABELS[kind]}完成 ${done} 本${keptText}${failureText}`
         : `${BATCH_LABELS[kind]}完成，共 ${done} 本${keptText}`
     notify(summary)
     if (kind === 'delete') exitSelection()
@@ -186,7 +206,8 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   const finishMerge = (remaining: MergeCandidate[], tally: MergeTally): void => {
     setMergeCandidates(remaining)
     if (remaining.length > 0) return
-    const warnings = tally.warnings.length > 0 ? `；${tally.warnings.join('；')}` : ''
+    setMergeTotal(0)
+    const warnings = tally.warnings.length > 0 ? `；${limitedJoin(tally.warnings)}` : ''
     const summary = `判断合并完成：合并 ${tally.merged} 对、跳过 ${tally.skipped} 对、失败 ${tally.failed} 对${warnings}`
     notify(summary)
     setMergeTally({ merged: 0, skipped: 0, failed: 0, warnings: [] })
@@ -200,6 +221,10 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
       notify('请至少勾选 2 本书')
       return
     }
+    if (busyRef.current) {
+      notify('正在导入，请稍候')
+      return
+    }
     setActionBusy(true)
     setFindingMerges(true)
     try {
@@ -207,13 +232,14 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
       if (result.candidates.length === 0) {
         notify(
           result.warnings.length > 0
-            ? [...result.warnings, '没有发现可能是同一本书的候选'].join('；')
+            ? `${limitedJoin(result.warnings)}；没有发现可能是同一本书的候选`
             : '没有发现可能是同一本书的候选'
         )
         return
       }
-      if (result.warnings.length > 0) notify(result.warnings.join('；'))
+      if (result.warnings.length > 0) notify(limitedJoin(result.warnings))
       setMergeTally({ merged: 0, skipped: 0, failed: 0, warnings: [] })
+      setMergeTotal(result.candidates.length)
       setMergeCandidates(result.candidates)
     } catch (reason) {
       notify(`判断合并失败：${errorText(reason)}`)
@@ -291,11 +317,20 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   }, [])
 
   useEffect(() => {
-    if (!hovered) return
-    const hide = (): void => setHovered(null)
+    const hide = (): void => {
+      if (hoverTimer.current !== null) {
+        window.clearTimeout(hoverTimer.current)
+        hoverTimer.current = null
+      }
+      setHovered(null)
+    }
     window.addEventListener('scroll', hide, true)
-    return () => window.removeEventListener('scroll', hide, true)
-  }, [hovered])
+    window.addEventListener('resize', hide)
+    return () => {
+      window.removeEventListener('scroll', hide, true)
+      window.removeEventListener('resize', hide)
+    }
+  }, [])
 
   useEffect(() => {
     if (!menu) return
@@ -322,9 +357,9 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     if (summary.canceled) return
     const parts: string[] = []
     if (summary.imported > 0) parts.push(`成功导入 ${summary.imported} 本`)
-    if (summary.duplicates.length > 0) parts.push(`已在书库：${summary.duplicates.join('、')}`)
-    if (summary.errors.length > 0) parts.push(`失败：${summary.errors.join('；')}`)
-    if (summary.warnings.length > 0) parts.push(`提示：${summary.warnings.join('；')}`)
+    if (summary.duplicates.length > 0) parts.push(`已在书库：${limitedJoin(summary.duplicates)}`)
+    if (summary.errors.length > 0) parts.push(`失败：${limitedJoin(summary.errors)}`)
+    if (summary.warnings.length > 0) parts.push(`提示：${limitedJoin(summary.warnings)}`)
     notify(parts.length > 0 ? parts.join(' ｜ ') : '没有导入任何文件')
     if (summary.suspects.length > 0) setMergeQueue(summary.suspects)
     await refresh()
@@ -369,7 +404,15 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     }
   }
 
-  const skipMerge = (): void => setMergeQueue((queue) => queue.slice(1))
+  const skipMerge = (): void => {
+    if (actionBusy) return
+    setMergeQueue((queue) => queue.slice(1))
+  }
+
+  const stopMerge = (): void => {
+    if (actionBusy) return
+    finishMerge([], mergeTally)
+  }
 
   const importPaths = async (paths: string[]): Promise<void> => {
     if (busyRef.current) {
@@ -384,7 +427,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
       notify('选择模式下不能导入，请先退出选择')
       return
     }
-    if (dialog || pendingMerge) return
+    if (dialog || pendingMerge || batchConfirm || mergeCandidates.length > 0 || actionBusy) return
     void importPaths(paths)
   })
 
@@ -430,6 +473,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   }
 
   const sorted = [...entries].sort(SORTERS[sort])
+  const mergePosition = mergeTotal > 0 ? mergeTotal - mergeCandidates.length + 1 : 0
 
   return (
     <div className="app">
@@ -472,24 +516,24 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
 
       {selectionMode && (
         <div className="batch-bar">
-          <button disabled={selected.size === 0 || actionBusy} onClick={() => void findMerges()}>
+          <button disabled={selected.size === 0 || actionBusy || busy} onClick={() => void findMerges()}>
             {findingMerges ? '判断中…' : '判断合并'}
           </button>
           <button
-            disabled={selected.size === 0 || actionBusy}
+            disabled={selected.size === 0 || actionBusy || busy}
             onClick={() => setBatchConfirm('reclean')}
           >
             重新清洗
           </button>
           <button
-            disabled={selected.size === 0 || actionBusy}
+            disabled={selected.size === 0 || actionBusy || busy}
             onClick={() => setBatchConfirm('resplit')}
           >
             重新切章
           </button>
           <button
             className="danger"
-            disabled={selected.size === 0 || actionBusy}
+            disabled={selected.size === 0 || actionBusy || busy}
             onClick={() => setBatchConfirm('delete')}
           >
             删除
@@ -551,7 +595,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
 
       {hovered && (
         <HoverCard anchor={hovered.rect}>
-          <BookInfo entry={hovered.entry} />
+          <BookInfo entry={hovered.entry} compact />
         </HoverCard>
       )}
 
@@ -602,7 +646,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
           onClose={skipMerge}
           footer={
             <>
-              <button className="modal-button ghost" onClick={skipMerge}>
+              <button className="modal-button ghost" disabled={actionBusy} onClick={skipMerge}>
                 先不合并
               </button>
               <button
@@ -619,16 +663,29 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
             《{pendingMerge.sourceTitle}》与《{pendingMerge.title}》有{' '}
             {(pendingMerge.overlap * 100).toFixed(0)}% 的章节内容重叠，可能是一本书的不同分卷。
           </p>
+          <dl className="info-list">
+            <dt>源书</dt>
+            <dd>
+              {filesText(pendingMerge.sourceFiles)}（{pendingMerge.sourceChapterCount} 章）
+            </dd>
+            <dt>目标书</dt>
+            <dd>
+              {filesText(pendingMerge.targetFiles)}（{pendingMerge.targetChapterCount} 章）
+            </dd>
+          </dl>
           <p className="modal-note">合并后会保留阅读进度和书签，并自动备份原书数据。</p>
         </Modal>
       )}
 
       {mergeCandidates[0] && (
         <Modal
-          title="判断合并"
+          title={mergeTotal > 0 ? `判断合并（第 ${mergePosition}/${mergeTotal} 对）` : '判断合并'}
           onClose={skipCandidate}
           footer={
             <>
+              <button className="modal-button ghost" disabled={actionBusy} onClick={stopMerge}>
+                停止判断
+              </button>
               <button className="modal-button ghost" disabled={actionBusy} onClick={skipCandidate}>
                 跳过
               </button>
@@ -646,6 +703,18 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
             《{mergeCandidates[0].targetTitle}》 ⇄ 《{mergeCandidates[0].sourceTitle}》 · 章节重叠{' '}
             {(mergeCandidates[0].overlap * 100).toFixed(0)}%
           </p>
+          <dl className="info-list">
+            <dt>源书</dt>
+            <dd>
+              {filesText(mergeCandidates[0].sourceFiles)}（{mergeCandidates[0].sourceChapterCount}{' '}
+              章）
+            </dd>
+            <dt>目标书</dt>
+            <dd>
+              {filesText(mergeCandidates[0].targetFiles)}（{mergeCandidates[0].targetChapterCount}{' '}
+              章）
+            </dd>
+          </dl>
           <p>
             将《{mergeCandidates[0].sourceTitle}》合并到《{mergeCandidates[0].targetTitle}》。
           </p>
@@ -746,7 +815,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
               </button>
               <button
                 className="modal-button danger"
-                disabled={actionBusy}
+                disabled={actionBusy || busy}
                 onClick={() => void runBatch('delete')}
               >
                 删除
@@ -779,7 +848,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
               </button>
               <button
                 className="modal-button"
-                disabled={actionBusy}
+                disabled={actionBusy || busy}
                 onClick={() => void runBatch('reclean')}
               >
                 重新清洗
@@ -803,7 +872,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
               </button>
               <button
                 className="modal-button"
-                disabled={actionBusy}
+                disabled={actionBusy || busy}
                 onClick={() => void runBatch('resplit')}
               >
                 重新切章

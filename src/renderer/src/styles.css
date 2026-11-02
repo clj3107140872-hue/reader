@@ -130,6 +130,7 @@ body {
   font-size: 14px;
   line-height: 1.6;
   text-align: center;
+  overflow-wrap: anywhere;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
   animation: toast-in 180ms ease-out;
 }
@@ -509,6 +510,8 @@ body {
 .modal .drawer-close { color: #6b6b6b; }
 .modal-body { padding: 16px 18px; font-size: 14px; line-height: 1.65; }
 .modal-body p { margin: 0 0 10px; }
+.modal-body .info-list { margin: 0 0 10px; }
+.modal:focus { outline: none; }
 .modal-note { color: #6b6b6b; font-size: 12px; }
 .modal-footer {
   display: flex;
@@ -558,6 +561,8 @@ body {
   position: fixed;
   z-index: 50;
   width: 300px;
+  max-height: calc(100vh - 16px);
+  overflow: hidden;
   padding: 12px 14px;
   background: #fffdf8;
   border: 1px solid #e2ddd2;

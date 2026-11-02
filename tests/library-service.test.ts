@@ -142,15 +142,14 @@ describe('LibraryService', () => {
     const result = await service.findMerges(['book-1', 'book-2'])
 
     expect(result.warnings).toEqual([])
-    expect(result.candidates).toEqual([
-      {
-        targetId: 'book-2',
-        targetTitle: '分卷书',
-        sourceId: 'book-1',
-        sourceTitle: '分卷书',
-        overlap: 0
-      }
-    ])
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]).toMatchObject({
+      targetId: 'book-2',
+      targetTitle: '分卷书',
+      sourceId: 'book-1',
+      sourceTitle: '分卷书',
+      overlap: 0
+    })
   })
 
   it('finds overlap when normalized titles differ', async () => {

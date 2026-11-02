@@ -5,16 +5,27 @@ function formatTime(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString('zh-CN', { hour12: false })
 }
 
-export default function BookInfo({ entry }: { entry: LibraryEntry }) {
+export default function BookInfo({
+  entry,
+  compact = false
+}: {
+  entry: LibraryEntry
+  compact?: boolean
+}) {
   const progress = entry.lastReadAt
     ? `${entry.progressPercent}% · 最近 ${formatTime(entry.lastReadAt)}`
     : '未阅读'
+  const files = entry.sourceFileNames ?? [entry.sourceFileName]
+  const fileText =
+    compact && files.length > 3
+      ? `${files.slice(0, 3).join('、')} 等 ${files.length} 个文件`
+      : files.join('、')
   return (
     <dl className="info-list">
       <dt>书名</dt>
       <dd>{entry.title}</dd>
       <dt>源文件</dt>
-      <dd>{(entry.sourceFileNames ?? [entry.sourceFileName]).join('、')}</dd>
+      <dd>{fileText}</dd>
       <dt>章节</dt>
       <dd>{entry.chapterCount} 章</dd>
       <dt>编码</dt>

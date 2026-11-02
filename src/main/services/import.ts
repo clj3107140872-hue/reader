@@ -11,8 +11,18 @@ export type ImportStage = 'reading' | 'parsing' | 'writing' | 'done'
 
 export interface ImportOutcome {
   entry: LibraryEntry
-  suspects: { id: string; title: string; overlap: number }[]
+  suspects: {
+    id: string
+    title: string
+    targetFiles: string[]
+    targetChapterCount: number
+    overlap: number
+  }[]
   warnings: string[]
+}
+
+function sourceFiles(entry: LibraryEntry): string[] {
+  return entry.sourceFileNames ?? [entry.sourceFileName]
 }
 
 export interface DuplicateOutcome {
@@ -76,7 +86,13 @@ export class ImportService {
         const sameTitle =
           Boolean(entry.normalizedTitle) && entry.normalizedTitle === other.normalizedTitle
         if (sameTitle || overlap >= 0.05) {
-          suspects.push({ id: other.id, title: other.title, overlap })
+          suspects.push({
+            id: other.id,
+            title: other.title,
+            targetFiles: sourceFiles(other),
+            targetChapterCount: otherMeta.chapters.length,
+            overlap
+          })
         }
       } catch {
         // A damaged entry must not abort an import that already succeeded.

@@ -11,8 +11,12 @@ import type { SettingsPatch } from './settings'
 export interface ImportSuspect {
   sourceId: string
   sourceTitle: string
+  sourceFiles: string[]
+  sourceChapterCount: number
   id: string
   title: string
+  targetFiles: string[]
+  targetChapterCount: number
   overlap: number
 }
 
@@ -28,8 +32,12 @@ export interface ImportSummary {
 export interface MergeCandidate {
   targetId: string
   targetTitle: string
+  targetFiles: string[]
+  targetChapterCount: number
   sourceId: string
   sourceTitle: string
+  sourceFiles: string[]
+  sourceChapterCount: number
   /** Chapter overlap ratio, 0..1. */
   overlap: number
 }

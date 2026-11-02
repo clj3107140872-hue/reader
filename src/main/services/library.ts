@@ -10,6 +10,10 @@ interface CandidateBook {
   meta: BookMeta
 }
 
+function sourceFiles(entry: LibraryEntry): string[] {
+  return entry.sourceFileNames ?? [entry.sourceFileName]
+}
+
 function pickDirection(a: CandidateBook, b: CandidateBook): [CandidateBook, CandidateBook] {
   const aCount = a.meta.chapters.length
   const bCount = b.meta.chapters.length
@@ -77,8 +81,12 @@ export class LibraryService {
         candidates.push({
           targetId: target.entry.id,
           targetTitle: target.entry.title,
+          targetFiles: sourceFiles(target.entry),
+          targetChapterCount: target.meta.chapters.length,
           sourceId: source.entry.id,
           sourceTitle: source.entry.title,
+          sourceFiles: sourceFiles(source.entry),
+          sourceChapterCount: source.meta.chapters.length,
           overlap
         })
       }

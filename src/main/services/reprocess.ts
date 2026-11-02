@@ -38,7 +38,7 @@ export class ReprocessService {
             duplicateParagraphsMerged: 0,
             suspectedDuplicateChapters: 0
           },
-          warning: '没有识别到至少 3 个章节标题，已保持原章节'
+          warning: '没有识别到至少 3 个章节标题，已保持原样'
         }
       }
       return this.commit(id, book, split.chapters)

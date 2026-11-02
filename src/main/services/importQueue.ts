@@ -79,7 +79,9 @@ export class ImportQueue {
           ...outcome.suspects.map((suspect) => ({
             ...suspect,
             sourceId: outcome.entry.id,
-            sourceTitle: outcome.entry.title
+            sourceTitle: outcome.entry.title,
+            sourceFiles: outcome.entry.sourceFileNames ?? [outcome.entry.sourceFileName],
+            sourceChapterCount: outcome.entry.chapterCount
           }))
         )
         for (const warning of outcome.warnings) {
