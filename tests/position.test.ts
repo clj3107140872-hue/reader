@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BookMeta } from '../src/core/model'
+import { resolveChapterIndex as resolveCoreChapterIndex } from '../src/core/position'
 import {
   chapterCharStarts,
   chapterIndexForPercent,
@@ -105,5 +106,25 @@ describe('reader position', () => {
     expect(positionForPercent(empty, 50, [])).toEqual({ chapterIndex: 0, paragraphIndex: 0 })
     const zeroChars: BookMeta = { ...meta(), chapters: [{ ...meta().chapters[0], charCount: 0 }] }
     expect(positionForPercent(zeroChars, 50, [['x']])).toEqual({ chapterIndex: 0, paragraphIndex: 0 })
+  })
+})
+
+describe('core chapter lookup', () => {
+  const chapters = [
+    { index: 0, title: '第一章', level: 'chapter' as const, titleHash: 'same', startLine: 0, charCount: 1, simhash: '1', flags: {} },
+    { index: 1, title: '第二章', level: 'chapter' as const, titleHash: 'other', startLine: 1, charCount: 1, simhash: '2', flags: {} },
+    { index: 2, title: '第一章', level: 'chapter' as const, titleHash: 'same', startLine: 2, charCount: 1, simhash: '3', flags: {} }
+  ]
+
+  it('matches the occurrence of the title hash nearest the fallback', () => {
+    expect(resolveCoreChapterIndex(chapters, 'same', 0)).toBe(0)
+    expect(resolveCoreChapterIndex(chapters, 'same', 2)).toBe(2)
+    expect(resolveCoreChapterIndex(chapters, 'same', 1)).toBe(0)
+  })
+
+  it('clamps the fallback when the key is gone', () => {
+    expect(resolveCoreChapterIndex(chapters, 'missing', 9)).toBe(2)
+    expect(resolveCoreChapterIndex(chapters, 'missing', -1)).toBe(0)
+    expect(resolveCoreChapterIndex([], 'missing', 3)).toBe(0)
   })
 })

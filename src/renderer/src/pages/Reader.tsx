@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { AppSettings, BookMeta, Bookmark, BookProgress } from '../../../core/model'
+import { splitParagraphs } from '../../../core/paragraphs'
 import type { OpenBookPayload } from '../../../shared/api'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../../shared/settings'
 import type { SettingsPatch } from '../../../shared/settings'
@@ -34,13 +35,6 @@ interface CurrentPosition {
   chapterIndex: number
   paragraphIndex: number
   percent: number
-}
-
-function splitParagraphs(text: string): string[] {
-  return text
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean)
 }
 
 /**

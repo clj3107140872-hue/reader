@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import type { BookMeta, BookProgress, Bookmark, CleanedChapter } from '../../core/model'
+import { splitParagraphs } from '../../core/paragraphs'
 import { assertBookId } from '../bookId'
 import { atomicWriteJson, ensureDir, pathExists, readJson } from './fsUtil'
 
@@ -88,10 +89,7 @@ export class BookRepository {
         title: chapter.title,
         level: chapter.level,
         startLine: chapter.startLine,
-        paragraphs: text
-          .split(/\n{2,}/)
-          .map((paragraph) => paragraph.trim())
-          .filter(Boolean)
+        paragraphs: splitParagraphs(text)
       })
     }
     return { meta, sourceText: await this.readSource(id), chapters }

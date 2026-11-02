@@ -1,4 +1,5 @@
 import type { BookMeta } from '../../../core/model'
+import { resolveChapterIndex as resolveCoreChapterIndex } from '../../../core/position'
 
 export function chapterCharStarts(meta: BookMeta): number[] {
   const starts: number[] = []
@@ -87,15 +88,5 @@ export function positionForPercent(
 }
 
 export function resolveChapterIndex(meta: BookMeta, chapterKey: string, fallback: number): number {
-  if (meta.chapters.length === 0) return 0
-  const matches: number[] = []
-  meta.chapters.forEach((chapter, index) => {
-    if (chapter.titleHash === chapterKey) matches.push(index)
-  })
-  if (matches.length > 0) {
-    return matches.reduce((best, index) =>
-      Math.abs(index - fallback) < Math.abs(best - fallback) ? index : best
-    )
-  }
-  return Math.min(Math.max(fallback, 0), meta.chapters.length - 1)
+  return resolveCoreChapterIndex(meta.chapters, chapterKey, fallback)
 }

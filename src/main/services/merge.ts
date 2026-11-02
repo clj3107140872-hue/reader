@@ -8,6 +8,7 @@ import type {
 } from '../../core/model'
 import { buildBookDocuments } from '../../core/compose'
 import { dedupeCrossChapterParagraphs } from '../../core/dedupe'
+import { resolveChapterIndex } from '../../core/position'
 import { displayBookTitle, planMerge } from '../../core/sameBook'
 import type { MergeResult } from '../../shared/api'
 import { assertBookId } from '../bookId'
@@ -30,25 +31,10 @@ function mergeBookmarks(target: Bookmark[], source: Bookmark[]): Bookmark[] {
   return merged
 }
 
-/** Same rule as resolveChapterIndex in the reader: nearest chapter by title hash. */
-function remapChapterIndex(chapters: ChapterMeta[], chapterKey: string, fallback: number): number {
-  if (chapters.length === 0) return 0
-  const matches: number[] = []
-  chapters.forEach((chapter, index) => {
-    if (chapter.titleHash === chapterKey) matches.push(index)
-  })
-  if (matches.length > 0) {
-    return matches.reduce((best, index) =>
-      Math.abs(index - fallback) < Math.abs(best - fallback) ? index : best
-    )
-  }
-  return Math.min(Math.max(fallback, 0), chapters.length - 1)
-}
-
 function remapBookmark(bookmark: Bookmark, chapters: ChapterMeta[]): Bookmark {
   return {
     ...bookmark,
-    chapterIndex: remapChapterIndex(chapters, bookmark.chapterKey, bookmark.chapterIndex)
+    chapterIndex: resolveChapterIndex(chapters, bookmark.chapterKey, bookmark.chapterIndex)
   }
 }
 
@@ -59,7 +45,7 @@ function remapProgress(
   if (!progress) return null
   return {
     ...progress,
-    chapterIndex: remapChapterIndex(chapters, progress.chapterKey, progress.chapterIndex)
+    chapterIndex: resolveChapterIndex(chapters, progress.chapterKey, progress.chapterIndex)
   }
 }
 

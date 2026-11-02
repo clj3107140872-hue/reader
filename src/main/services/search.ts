@@ -1,4 +1,5 @@
 import type { SearchHit, SearchProgress, SearchResults } from '../../shared/api'
+import { splitParagraphs } from '../../core/paragraphs'
 import type { BookRepository } from '../storage/book'
 import { assertBookId } from '../bookId'
 
@@ -31,10 +32,7 @@ export class SearchService {
       }
 
       const text = await this.books.readChapter(id, index)
-      const paragraphs = text
-        .split(/\n{2,}/)
-        .map((paragraph) => paragraph.trim())
-        .filter(Boolean)
+      const paragraphs = splitParagraphs(text)
 
       for (let paragraphIndex = 0; paragraphIndex < paragraphs.length; paragraphIndex++) {
         const paragraph = paragraphs[paragraphIndex]
