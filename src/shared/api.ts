@@ -182,6 +182,15 @@ export interface SearchResults {
   cancelled: boolean
 }
 
+export interface WindowBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export type WindowResizeEdge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
+
 export interface DebugWindowState {
   visible: boolean
   minimised: boolean
@@ -191,6 +200,7 @@ export interface DebugWindowState {
   disguise: DisguiseStyle
   windowKind: 'normal' | 'transparent' | 'code'
   resizable: boolean
+  bounds: WindowBounds
 }
 
 export interface BackdropTone {
@@ -219,6 +229,10 @@ export interface ReaderApi {
   onFlushRequest(cb: () => void): () => void
   /** Acknowledges that the reading position has been persisted. */
   notifyFlushed(): void
+  /** Custom window resizing for frameless disguises (native resize is off). */
+  windowResizeStart(edge: WindowResizeEdge, screenX: number, screenY: number): void
+  windowResizeMove(screenX: number, screenY: number): void
+  windowResizeEnd(): void
   onBackdropTone(cb: (payload: BackdropTone) => void): () => void
   onImportProgress(cb: (payload: { fileName: string; stage: string }) => void): () => void
   openBook(id: string): Promise<OpenBookPayload>

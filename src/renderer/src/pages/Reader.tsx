@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import type {
   AppSettings,
   BookMeta,
@@ -9,7 +9,7 @@ import type {
   ThemeName
 } from '../../../core/model'
 import { splitParagraphs } from '../../../core/paragraphs'
-import type { OpenBookPayload } from '../../../shared/api'
+import type { OpenBookPayload, WindowResizeEdge } from '../../../shared/api'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../../shared/settings'
 import type { SettingsPatch } from '../../../shared/settings'
 import BookmarksPanel from '../components/BookmarksPanel'
@@ -75,6 +75,52 @@ const DISGUISE_TITLES: Record<Exclude<DisguiseStyle, 'none'>, string> = {
 }
 
 const NOTEPAD_MENUS = ['文件', '编辑', '格式', '查看', '帮助'] as const
+
+const RESIZE_EDGES: WindowResizeEdge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
+const CODE_COLUMN_KEY = 'reader.codeColumnWidth'
+const CODE_COLUMN_MIN = 160
+/** 58px gutter, 8px drag handle and the 8px gap before the window edge. */
+const CODE_COLUMN_CHROME = 74
+
+function readCodeColumnWidth(): number | null {
+  try {
+    const raw = window.localStorage.getItem(CODE_COLUMN_KEY)
+    const parsed = raw === null ? Number.NaN : Number(raw)
+    return Number.isFinite(parsed) && parsed >= CODE_COLUMN_MIN ? Math.round(parsed) : null
+  } catch {
+    return null
+  }
+}
+
+/** Invisible edge strips that resize frameless disguise windows over IPC. */
+function WindowResizeHandles() {
+  return (
+    <>
+      {RESIZE_EDGES.map((edge) => (
+        <div
+          key={edge}
+          className={`window-resize window-resize-${edge}`}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.currentTarget.setPointerCapture(event.pointerId)
+            window.api.windowResizeStart(edge, event.screenX, event.screenY)
+          }}
+          onPointerMove={(event) => {
+            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+            window.api.windowResizeMove(event.screenX, event.screenY)
+          }}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId)
+            }
+            window.api.windowResizeEnd()
+          }}
+          onPointerCancel={() => window.api.windowResizeEnd()}
+        />
+      ))}
+    </>
+  )
+}
 
 type CodeTokenKind = 'kw' | 'str' | 'fn' | 'comment' | 'num'
 
@@ -257,9 +303,12 @@ export default function Reader({
   const [warningHidden, setWarningHidden] = useState(false)
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
   const [backdropDark, setBackdropDark] = useState(false)
+  const [codeColumnWidth, setCodeColumnWidth] = useState<number | null>(readCodeColumnWidth)
   const style = settings.slacking.disguise
   const disguised = style !== 'none'
   const scrollRef = useRef<HTMLElement | null>(null)
+  const bandRef = useRef<HTMLDivElement | null>(null)
+  const columnDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const restoredRef = useRef(false)
   const rafRef = useRef(0)
   const pendingRef = useRef<BookProgress | null>(null)
@@ -322,6 +371,49 @@ export default function Reader({
     },
     [onSettingsChange]
   )
+
+  // Remembering the comment column width keeps the code disguise stable when
+  // the window is recreated for another style.
+  useEffect(() => {
+    if (codeColumnWidth === null) return
+    try {
+      window.localStorage.setItem(CODE_COLUMN_KEY, String(codeColumnWidth))
+    } catch {
+      // Local storage may be unavailable; the width simply resets next time.
+    }
+  }, [codeColumnWidth])
+
+  const startColumnResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const scroll = scrollRef.current
+    if (!scroll) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    columnDragRef.current = {
+      startX: event.screenX,
+      startWidth: scroll.getBoundingClientRect().width
+    }
+  }
+
+  const moveColumnResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const drag = columnDragRef.current
+    const band = bandRef.current
+    if (!drag || !band || !event.currentTarget.hasPointerCapture(event.pointerId)) return
+    const available = Math.max(CODE_COLUMN_MIN, band.clientWidth - CODE_COLUMN_CHROME)
+    const next = Math.round(
+      Math.min(
+        available,
+        Math.max(CODE_COLUMN_MIN, drag.startWidth + event.screenX - drag.startX)
+      )
+    )
+    setCodeColumnWidth(next)
+  }
+
+  const endColumnResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    columnDragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
 
   const chapters = useMemo<ChapterView[]>(() => {
     if (!book) return []
@@ -783,6 +875,8 @@ export default function Reader({
 
       {style === 'transparent' && <div className="transparent-drag-strip" />}
 
+      {(style === 'transparent' || style === 'code') && <WindowResizeHandles />}
+
       {(style === 'transparent' || style === 'code') && (
         <button
           className="disguise-exit"
@@ -806,7 +900,7 @@ export default function Reader({
       {style === 'code' ? (
         <div className="vscode-editor">
           <CodeRows lines={CODE_TOP} start={1} />
-          <div className="vscode-comment-band">
+          <div className="vscode-comment-band" ref={bandRef}>
             <div className="vscode-comment-gutter" aria-hidden="true">
               {COMMENT_LINE_NUMBERS.map((line) => (
                 <span key={line}>{line}</span>
@@ -816,9 +910,24 @@ export default function Reader({
               className="reader-scroll vscode-comment-scroll"
               ref={scrollRef}
               onScroll={handleScroll}
+              style={
+                codeColumnWidth === null
+                  ? undefined
+                  : { flex: `0 0 ${codeColumnWidth}px`, width: codeColumnWidth }
+              }
             >
               <ReaderBody chapters={chapters} />
             </main>
+            <div
+              className="vscode-column-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              onPointerDown={startColumnResize}
+              onPointerMove={moveColumnResize}
+              onPointerUp={endColumnResize}
+              onPointerCancel={endColumnResize}
+            />
+            <div className="vscode-comment-filler" aria-hidden="true" />
           </div>
           <CodeRows lines={CODE_BOTTOM} start={CODE_BOTTOM_START} />
         </div>

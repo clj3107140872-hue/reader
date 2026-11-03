@@ -23,6 +23,15 @@ const api: ReaderApi = {
   notifyFlushed: () => {
     ipcRenderer.send('app:flush-done')
   },
+  windowResizeStart: (edge, screenX, screenY) => {
+    ipcRenderer.send('window:resize-start', { edge, screenX, screenY })
+  },
+  windowResizeMove: (screenX, screenY) => {
+    ipcRenderer.send('window:resize-move', { screenX, screenY })
+  },
+  windowResizeEnd: () => {
+    ipcRenderer.send('window:resize-end')
+  },
   onBackdropTone: (callback) => {
     const listener = (_event: unknown, payload: BackdropTone): void => callback(payload)
     ipcRenderer.on('slacking:backdrop', listener)

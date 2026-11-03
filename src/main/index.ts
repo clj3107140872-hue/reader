@@ -8,7 +8,7 @@ import {
   Menu,
   screen
 } from 'electron'
-import type { MessageBoxOptions, OpenDialogOptions, WebContents } from 'electron'
+import type { MessageBoxOptions, OpenDialogOptions, Rectangle, WebContents } from 'electron'
 import { join } from 'node:path'
 import type { AppSettings, BookProgress } from '../core/model'
 import type { SupportedEncoding } from '../shared/encodings'
@@ -27,6 +27,8 @@ import { resolveDataDir } from './services/paths'
 import { ReaderService } from './services/reader'
 import { ReprocessService } from './services/reprocess'
 import { SearchService } from './services/search'
+import { resizeBounds } from './services/windowResize'
+import type { WindowResizeEdge } from './services/windowResize'
 import { BookRepository } from './storage/book'
 import { LibraryRepository } from './storage/library'
 import { RuleRepository } from './storage/rules'
@@ -132,6 +134,30 @@ let backdropErrorLogged = false
 function desiredWindowKind(settings: AppSettings, bookId: string | null): WindowKind {
   return disguiseWindowKind(settings.slacking.disguise, bookId !== null)
 }
+
+/** Disguise windows may shrink far below the reader's comfortable minimum. */
+function minWindowSize(kind: WindowKind): { width: number; height: number } {
+  if (kind === 'transparent') return { width: 120, height: 80 }
+  if (kind === 'code') return { width: 300, height: 240 }
+  return { width: 800, height: 600 }
+}
+
+interface ResizeSession {
+  win: BrowserWindow
+  edge: WindowResizeEdge
+  screenX: number
+  screenY: number
+  bounds: Rectangle
+  min: { width: number; height: number }
+}
+
+const RESIZE_EDGES: WindowResizeEdge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
+
+function isResizeEdge(value: unknown): value is WindowResizeEdge {
+  return typeof value === 'string' && RESIZE_EDGES.includes(value as WindowResizeEdge)
+}
+
+let resizeSession: ResizeSession | null = null
 
 function toggleBossKey(): void {
   const win = mainWindow
@@ -355,7 +381,6 @@ function createWindow(
   // The library always keeps a normal frame; the disguise only applies while a
   // book is open.
   const disguise = bookId ? settings.slacking.disguise : 'none'
-  const frameless = kind !== 'normal'
   const win = new BrowserWindow({
     width: clamped.width,
     height: clamped.height,
@@ -372,9 +397,8 @@ function createWindow(
       kind === 'transparent' ? '#00000000' : kind === 'code' ? '#1e1e1e' : '#f5f3ee',
     opacity: settings.slacking.opacity,
     alwaysOnTop: settings.slacking.alwaysOnTop,
-    minWidth: frameless ? 480 : 800,
-    // The fake code blocks take 280px; keep enough room for the comments.
-    minHeight: kind === 'code' ? 420 : frameless ? 320 : 600,
+    minWidth: minWindowSize(kind).width,
+    minHeight: minWindowSize(kind).height,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -523,6 +547,54 @@ if (hasSingleInstanceLock) {
       win.setFullScreen(next)
       return next
     })
+    // Frameless disguise windows (especially transparent ones) do not get a
+    // reliable native resize border, so the renderer's edge handles drive
+    // setBounds themselves.
+    ipcMain.on(
+      'window:resize-start',
+      (event, payload: { edge?: unknown; screenX?: unknown; screenY?: unknown }) => {
+        const win = BrowserWindow.fromWebContents(event.sender)
+        const edge = payload?.edge
+        if (!win || win !== mainWindow || !isResizeEdge(edge)) return
+        if (typeof payload.screenX !== 'number' || typeof payload.screenY !== 'number') return
+        resizeSession = {
+          win,
+          edge,
+          screenX: payload.screenX,
+          screenY: payload.screenY,
+          bounds: win.getBounds(),
+          min: minWindowSize(windowKind)
+        }
+      }
+    )
+    ipcMain.on(
+      'window:resize-move',
+      (event, payload: { screenX?: unknown; screenY?: unknown }) => {
+        const session = resizeSession
+        if (
+          !session ||
+          BrowserWindow.fromWebContents(event.sender) !== session.win ||
+          typeof payload?.screenX !== 'number' ||
+          typeof payload?.screenY !== 'number'
+        ) {
+          return
+        }
+        session.win.setBounds(
+          resizeBounds(
+            session.bounds,
+            session.edge,
+            payload.screenX - session.screenX,
+            payload.screenY - session.screenY,
+            session.min
+          )
+        )
+      }
+    )
+    ipcMain.on('window:resize-end', (event) => {
+      if (resizeSession && BrowserWindow.fromWebContents(event.sender) === resizeSession.win) {
+        resizeSession = null
+      }
+    })
     ipcMain.handle('library:list', () => library.list())
     ipcMain.handle('library:find-merges', (_event, ids: unknown) => {
       const safeIds = Array.isArray(ids)
@@ -658,7 +730,8 @@ if (hasSingleInstanceLock) {
           bossKey: registeredBossKey,
           disguise: slackingSettings?.disguise ?? 'none',
           windowKind,
-          resizable: win.isResizable()
+          resizable: win.isResizable(),
+          bounds: win.getBounds()
         }
       })
       ipcMain.handle('debug:backdrop', (_event, dark: unknown) => {
