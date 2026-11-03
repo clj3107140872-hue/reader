@@ -58,6 +58,10 @@ export function parseBookFile(
   const decoded = decodeBook(contents)
   const repair = repairMojibake(decoded.text, decoded.encoding)
   const split = splitChapters(repair.text)
+  const warnings = [...repair.warnings]
+  if (!split.detected) {
+    warnings.push('未识别到章节标题，已按单章导入，可在右键菜单手动标记章节')
+  }
   const adRules = options.adRules ?? [...BUILTIN_AD_RULES, ...(options.userRules ?? [])]
   const cleaned = cleanChapters(split.chapters, adRules, { adCleaning: options.adCleaning })
 
@@ -87,6 +91,6 @@ export function parseBookFile(
     chapters: cleaned.chapters,
     meta,
     stats,
-    warnings: repair.warnings
+    warnings
   }
 }

@@ -63,6 +63,28 @@ export interface DecodeResult {
   text: string
 }
 
+import type { SupportedEncoding } from '../shared/encodings'
+
+export { ENCODING_OPTIONS as SUPPORTED_ENCODINGS, isSupportedEncoding } from '../shared/encodings'
+export type { SupportedEncoding } from '../shared/encodings'
+
+/** Decodes with an explicitly chosen encoding instead of auto-detection. */
+export function decodeWithEncoding(buf: Buffer, encoding: SupportedEncoding): DecodeResult {
+  if (buf.length === 0) throw new Error('空文件')
+
+  let body = buf
+  if (encoding === 'utf8' && buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+    body = buf.subarray(3)
+  } else if (encoding === 'utf16le' && buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) {
+    body = buf.subarray(2)
+  } else if (encoding === 'utf16be' && buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
+    body = buf.subarray(2)
+  }
+
+  if (encoding === 'utf16be') return { encoding, text: decodeUtf16be(body) }
+  return { encoding, text: iconv.decode(body, encoding) }
+}
+
 export function decodeBook(buf: Buffer): DecodeResult {
   if (buf.length === 0) throw new Error('空文件')
 

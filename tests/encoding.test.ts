@@ -1,6 +1,18 @@
 import iconv from 'iconv-lite'
 import { describe, expect, it } from 'vitest'
-import { decodeBook } from '../src/core/encoding'
+import { decodeBook, decodeWithEncoding } from '../src/core/encoding'
+
+describe('decodeWithEncoding', () => {
+  it('decodes with the chosen encoding and strips a matching BOM', () => {
+    const text = '第一章 风起\n正文。'
+    expect(decodeWithEncoding(iconv.encode(text, 'gb18030'), 'gb18030')).toEqual({
+      encoding: 'gb18030',
+      text
+    })
+    const withBom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text, 'utf8')])
+    expect(decodeWithEncoding(withBom, 'utf8')).toEqual({ encoding: 'utf8', text })
+  })
+})
 
 describe('decodeBook', () => {
   const simplified = '这是一本测试小说，第一章开始。'

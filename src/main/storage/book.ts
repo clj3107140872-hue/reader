@@ -15,6 +15,12 @@ export interface BookFiles {
   meta: BookMeta
   sourceText: string
   chapters: CleanedChapter[]
+  /**
+   * Original file bytes, kept so the encoding can be changed later.
+   * On write: a Buffer replaces the stored bytes, `null` drops them, and
+   * `undefined` keeps whatever the book already has.
+   */
+  original?: Buffer | null
 }
 
 export interface ProgressFile {
@@ -24,7 +30,7 @@ export interface ProgressFile {
 
 export interface BackupManifest {
   version: 1
-  reason: 'merge' | 'reclean' | 'resplit'
+  reason: 'merge' | 'reclean' | 'resplit' | 'encoding'
   createdAt: string
   targetEntry: LibraryEntry
   sourceEntry?: LibraryEntry
@@ -36,7 +42,7 @@ export interface BackupInfo {
   name: string
   createdAt: string
   chapterCount: number
-  reason: 'merge' | 'reclean' | 'resplit' | 'unknown'
+  reason: 'merge' | 'reclean' | 'resplit' | 'encoding' | 'unknown'
   sourceTitle?: string
   hasSource: boolean
 }
@@ -93,6 +99,12 @@ export class BookRepository {
     }
 
     const target = this.bookDir(files.meta.id)
+    if (files.original !== null && files.original !== undefined && Buffer.isBuffer(files.original)) {
+      await fs.writeFile(join(tmp, 'original.bin'), files.original)
+    } else if (files.original === undefined && (await pathExists(join(target, 'original.bin')))) {
+      await fs.copyFile(join(target, 'original.bin'), join(tmp, 'original.bin'))
+    }
+
     let replaced: string | null = null
     if (await pathExists(target)) {
       replaced = join(booksDir, `.bak-${files.meta.id}-${Date.now()}`)
@@ -131,7 +143,7 @@ export class BookRepository {
 
   private async copyBookData(from: string, to: string): Promise<void> {
     await ensureDir(to)
-    for (const name of ['source.txt', 'meta.json', 'progress.json']) {
+    for (const name of ['source.txt', 'meta.json', 'progress.json', 'original.bin']) {
       if (await pathExists(join(from, name))) {
         await fs.copyFile(join(from, name), join(to, name))
       }
@@ -320,7 +332,25 @@ export class BookRepository {
         paragraphs: splitParagraphs(text)
       })
     }
-    return { meta, sourceText: await this.readSource(id), chapters }
+    const original = await this.readOriginal(id)
+    return { meta, sourceText: await this.readSource(id), chapters, original }
+  }
+
+  async readOriginal(id: string): Promise<Buffer | undefined> {
+    try {
+      return await fs.readFile(join(this.bookDir(id), 'original.bin'))
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Store the original bytes for books imported before this file was kept. */
+  async writeOriginal(id: string, bytes: Buffer): Promise<void> {
+    assertBookId(id)
+    const target = join(this.bookDir(id), 'original.bin')
+    const tmp = `${target}.tmp`
+    await fs.writeFile(tmp, bytes)
+    await fs.rename(tmp, target)
   }
 
   async readProgress(id: string): Promise<ProgressFile> {

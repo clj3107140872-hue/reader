@@ -10,7 +10,9 @@ import type {
 } from '../../../shared/api'
 import BookCard from '../components/BookCard'
 import BookInfo from '../components/BookInfo'
+import ChapterMarkerDialog from '../components/ChapterMarkerDialog'
 import CleaningDialog from '../components/CleaningDialog'
+import EncodingDialog from '../components/EncodingDialog'
 import HoverCard from '../components/HoverCard'
 import Modal from '../components/Modal'
 import { errorText } from '../errors'
@@ -46,6 +48,7 @@ function backupReasonLabel(backup: BackupInfo): string {
   if (backup.reason === 'merge') return '合并前'
   if (backup.reason === 'reclean') return '重新清洗前'
   if (backup.reason === 'resplit') return '重新切章前'
+  if (backup.reason === 'encoding') return '切换编码前'
   return '自动备份'
 }
 
@@ -61,6 +64,8 @@ type Dialog =
   | { kind: 'delete'; entry: LibraryEntry }
   | { kind: 'reclean'; entry: LibraryEntry }
   | { kind: 'resplit'; entry: LibraryEntry }
+  | { kind: 'markers'; entry: LibraryEntry }
+  | { kind: 'encoding'; entry: LibraryEntry }
   | { kind: 'cleaning'; bookId: string | null; tab: 'report' | 'rules' }
 
 interface ToastAction {
@@ -84,7 +89,7 @@ const STAGE_LABELS: Record<string, string> = {
 function clampMenu(x: number, y: number): { x: number; y: number } {
   return {
     x: Math.max(8, Math.min(x, window.innerWidth - 168)),
-    y: Math.max(8, Math.min(y, window.innerHeight - 232))
+    y: Math.max(8, Math.min(y, window.innerHeight - 304))
   }
 }
 
@@ -537,8 +542,16 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
         kind === 'reclean'
           ? `移除广告 ${result.stats.adLinesRemoved} 行，合并重复段 ${result.stats.duplicateParagraphsMerged} 处`
           : `共 ${result.chapterCount} 章`
+      const markedAction: ToastAction | undefined =
+        kind === 'resplit' && result.warning
+          ? {
+              label: '手动标记',
+              run: () => setDialog({ kind: 'markers', entry })
+            }
+          : undefined
       notify(
-        `已${label}《${entry.title}》：${detail}${result.warning ? `；${result.warning}` : ''}`
+        `已${label}《${entry.title}》：${detail}${result.warning ? `；${result.warning}` : ''}`,
+        markedAction
       )
       await refresh()
     } catch (reason) {
@@ -546,6 +559,26 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     } finally {
       setActionBusy(false)
     }
+  }
+
+  const handleMarkersApplied = (entry: LibraryEntry, result: ReprocessResult): void => {
+    setDialog(null)
+    notify(
+      `已按标记切分《${entry.title}》：共 ${result.chapterCount} 章${
+        result.warning ? `；${result.warning}` : ''
+      }`
+    )
+    void refresh().catch((reason) => notify(`书架刷新失败：${errorText(reason)}`))
+  }
+
+  const handleEncodingApplied = (entry: LibraryEntry, result: ReprocessResult): void => {
+    setDialog(null)
+    notify(
+      `已切换编码并重新解析《${entry.title}》：共 ${result.chapterCount} 章${
+        result.warning ? `；${result.warning}` : ''
+      }`
+    )
+    void refresh().catch((reason) => notify(`书架刷新失败：${errorText(reason)}`))
   }
 
   const handleCleaningApplied = (result: ReprocessResult): void => {
@@ -741,6 +774,22 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
               }}
             >
               重新切章
+            </button>
+            <button
+              onClick={() => {
+                setDialog({ kind: 'markers', entry: menu.entry })
+                setMenu(null)
+              }}
+            >
+              标记章节…
+            </button>
+            <button
+              onClick={() => {
+                setDialog({ kind: 'encoding', entry: menu.entry })
+                setMenu(null)
+              }}
+            >
+              切换编码…
             </button>
             <button
               className="danger"
@@ -987,6 +1036,25 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
             识别不到至少 3 个章节标题时会保持原样。原数据会自动备份，阅读进度和书签保留。
           </p>
         </Modal>
+      )}
+
+      {dialog?.kind === 'markers' && (
+        <ChapterMarkerDialog
+          bookId={dialog.entry.id}
+          title={dialog.entry.title}
+          notify={notify}
+          onClose={() => setDialog(null)}
+          onApplied={(result) => handleMarkersApplied(dialog.entry, result)}
+        />
+      )}
+
+      {dialog?.kind === 'encoding' && (
+        <EncodingDialog
+          entry={dialog.entry}
+          notify={notify}
+          onClose={() => setDialog(null)}
+          onApplied={(result) => handleEncodingApplied(dialog.entry, result)}
+        />
       )}
 
       {batchConfirm === 'delete' && (

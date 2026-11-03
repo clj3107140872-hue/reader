@@ -1,4 +1,5 @@
 import type { CleanLineDetail } from '../core/cleaning'
+import type { SupportedEncoding } from './encodings'
 import type {
   AdRule,
   AppSettings,
@@ -78,6 +79,18 @@ export interface CleaningChapterDiff {
   duplicateParagraphsMerged: number
 }
 
+export interface ChapterLinesPayload {
+  lines: string[]
+  starts: number[]
+}
+
+export interface EncodingPreview {
+  encoding: string
+  lines: string[]
+  totalLines: number
+  warnings: string[]
+}
+
 export interface MergeCandidate {
   targetId: string
   targetTitle: string
@@ -115,7 +128,7 @@ export interface BackupInfo {
   name: string
   createdAt: string
   chapterCount: number
-  reason: 'merge' | 'reclean' | 'resplit' | 'unknown'
+  reason: 'merge' | 'reclean' | 'resplit' | 'encoding' | 'unknown'
   sourceTitle?: string
 }
 
@@ -186,6 +199,11 @@ export interface ReaderApi {
   getStartupNotice(): Promise<StartupNotice>
   recleanBook(id: string): Promise<ReprocessResult>
   resplitBook(id: string): Promise<ReprocessResult>
+  chapterLines(id: string): Promise<ChapterLinesPayload>
+  applyChapterStarts(id: string, starts: number[]): Promise<ReprocessResult>
+  previewEncoding(id: string, encoding: SupportedEncoding): Promise<EncodingPreview>
+  applyEncoding(id: string, encoding: SupportedEncoding): Promise<ReprocessResult>
+  attachOriginal(id: string): Promise<{ fileName: string } | null>
   getCleaningConfig(): Promise<CleaningConfig>
   saveCleaningConfig(config: CleaningConfig): Promise<CleaningConfig>
   previewCleaning(bookId: string, config?: CleaningConfig): Promise<CleaningPreview>

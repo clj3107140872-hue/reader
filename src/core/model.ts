@@ -17,6 +17,8 @@ export interface BookMeta {
   title: string
   encoding: string
   chapters: ChapterMeta[]
+  /** Line numbers the user marked as chapter titles; absent for auto-split books. */
+  chapterStarts?: number[]
   createdAt: string
 }
 

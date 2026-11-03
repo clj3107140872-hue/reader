@@ -944,3 +944,103 @@ body {
   border-radius: 4px;
   padding: 0 5px;
 }
+
+/* Chapter markers & encoding */
+.marker-toolbar {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 6px;
+}
+.marker-toolbar input {
+  flex: 1 1 auto;
+  border: 1px solid #d8d3c8;
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 13px;
+  background: #fff;
+  color: #2b2b2b;
+}
+.marker-toolbar input:focus {
+  outline: 2px solid rgba(74, 103, 65, 0.25);
+  border-color: #4a6741;
+}
+.marker-toolbar .modal-button { padding: 5px 12px; white-space: nowrap; }
+.marker-summary {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #6b6b6b;
+  margin: 4px 0;
+}
+.marker-list {
+  overflow-y: auto;
+  border: 1px solid #e2ddd2;
+  border-radius: 8px;
+  background: #fffdf8;
+  font-size: 13px;
+}
+.marker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  border-bottom: 1px solid #f2eee6;
+  cursor: pointer;
+}
+.marker-row:hover { background: #f6f2e9; }
+.marker-row.on { background: #eef5e9; }
+.marker-row.blank { opacity: 0.45; background: transparent; cursor: default; }
+.marker-row input { margin: 0; flex: none; }
+.marker-no {
+  width: 42px;
+  flex: none;
+  text-align: right;
+  color: #8a7f6d;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.marker-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.encoding-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0;
+}
+.encoding-toolbar label { font-size: 13px; }
+.encoding-toolbar select {
+  border: 1px solid #d8d3c8;
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 13px;
+  background: #fff;
+  color: #2b2b2b;
+}
+.encoding-preview {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  max-height: 320px;
+  overflow: auto;
+  background: #faf8f3;
+  border: 1px solid #e2ddd2;
+  border-radius: 8px;
+  font-family: 'Sarasa Mono SC', 'Microsoft YaHei', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.modal-error {
+  color: #a4402f;
+  background: #fbe9e5;
+  border: 1px solid #e8c7bf;
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 13px;
+}

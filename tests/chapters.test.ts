@@ -39,6 +39,13 @@ describe('splitChapters', () => {
     expect(result.chapters.map((c) => c.title)).toEqual(['第一章 甲', '第二章 乙'])
     expect(result.chapters[0].paragraphs).toEqual(['内容一'])
   })
+
+  it('ignores duplicate and blank marker lines', () => {
+    const text = ['第一章 甲', '内容一', '', '第二章 乙', '内容二'].join('\n')
+    const result = splitAtMarkerLines(text, [3, 0, 0, 2])
+    expect(result.chapters.map((c) => c.title)).toEqual(['第一章 甲', '第二章 乙'])
+    expect(result.chapters[0].paragraphs).toEqual(['内容一'])
+  })
 })
 
 describe('chapter numbering', () => {

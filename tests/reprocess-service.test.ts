@@ -1,3 +1,4 @@
+import iconv from 'iconv-lite'
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -164,6 +165,85 @@ describe('ReprocessService', () => {
 
     expect(result.stats.adLinesRemoved).toBe(0)
     expect(await books.readChapter('book-1', 0)).toContain('请记住本站')
+  })
+
+  it('splits at manually marked lines and keeps the marks across reclean', async () => {
+    const sourceText = ['开场白', '内容一。', '中场', '内容二。', '收尾', '内容三。'].join('\n')
+    await seed(sourceText, [
+      {
+        title: '正文',
+        level: 'chapter',
+        startLine: 0,
+        paragraphs: ['开场白', '内容一。', '中场', '内容二。', '收尾', '内容三。']
+      }
+    ])
+
+    const view = await service.chapterLines('book-1')
+    expect(view.lines[0]).toBe('开场白')
+    expect(view.starts).toEqual([])
+
+    const result = await service.applyChapterStarts('book-1', [0, 2, 4])
+
+    expect(result.chapterCount).toBe(3)
+    expect(await books.readChapter('book-1', 0)).toBe('内容一。')
+    expect((await books.readMeta('book-1')).chapterStarts).toEqual([0, 2, 4])
+
+    await service.reclean('book-1')
+
+    expect((await books.readMeta('book-1')).chapters.map((chapter) => chapter.startLine)).toEqual([
+      0, 2, 4
+    ])
+    expect((await books.readMeta('book-1')).chapterStarts).toEqual([0, 2, 4])
+  })
+
+  it('clears manual marks when resplitting automatically', async () => {
+    const sourceText = '第一章\n甲。\n第二章\n乙。\n第三章\n丙。'
+    await seed(sourceText, [
+      { title: '正文', level: 'chapter', startLine: 0, paragraphs: ['第一章', '甲。', '第二章', '乙。', '第三章', '丙。'] }
+    ])
+    await service.applyChapterStarts('book-1', [0, 2, 4])
+    expect((await books.readMeta('book-1')).chapterStarts).toEqual([0, 2, 4])
+
+    await service.resplit('book-1')
+
+    expect((await books.readMeta('book-1')).chapterStarts).toBeUndefined()
+  })
+
+  it('re-decodes from the stored original when the encoding changes', async () => {
+    const text = '第一章 风起\n正文一。\n第二章 云涌\n正文二。\n第三章 雨落\n正文三。'
+    await books.writeBook({
+      meta: {
+        version: 1,
+        id: 'book-1',
+        title: '测试书',
+        encoding: 'utf8',
+        chapters: buildChapterMetas([
+          { title: '正文', level: 'chapter', startLine: 0, paragraphs: ['乱码'] }
+        ]),
+        createdAt: '2026-01-01T00:00:00.000Z'
+      },
+      sourceText: '乱码',
+      chapters: [{ title: '正文', level: 'chapter', startLine: 0, paragraphs: ['乱码'] }],
+      original: iconv.encode(text, 'gb18030')
+    })
+    await library.add(entry(1))
+
+    const preview = await service.encodingPreview('book-1', 'gb18030')
+    expect(preview.encoding).toBe('gb18030')
+    expect(preview.lines[0]).toBe('第一章 风起')
+
+    const result = await service.applyEncoding('book-1', 'gb18030')
+
+    expect(result.chapterCount).toBe(3)
+    expect((await library.list())[0].encoding).toBe('gb18030')
+    expect(await books.readChapter('book-1', 0)).toBe('正文一。')
+    expect(await books.readSource('book-1')).toBe(text)
+  })
+
+  it('rejects encoding changes when the original bytes are missing', async () => {
+    await seed(AD_SOURCE, AD_CHAPTERS)
+
+    await expect(service.applyEncoding('book-1', 'gb18030')).rejects.toThrow('缺少原始文件数据')
   })
 
   it('keeps the book unchanged when no chapter titles are detected', async () => {

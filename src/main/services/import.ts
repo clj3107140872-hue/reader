@@ -65,7 +65,9 @@ export class ImportService {
     await this.books.writeBook({
       meta: parsed.meta,
       sourceText: parsed.sourceText,
-      chapters: parsed.chapters
+      chapters: parsed.chapters,
+      // Keep the raw bytes so the user can switch encodings later.
+      original: contents
     })
 
     const entry: LibraryEntry = {

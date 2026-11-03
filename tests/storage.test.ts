@@ -209,4 +209,24 @@ describe('BookRepository', () => {
     expect(files.chapters.map((chapter) => chapter.paragraphs)).toEqual([['第一段。'], ['第二段。']])
     expect(files.sourceText).toContain('第一章')
   })
+
+  it('keeps original bytes across rewrites and drops them on request', async () => {
+    const books = new BookRepository(root)
+    const files = {
+      meta: meta('book-5'),
+      sourceText: '第一章\n第一段。\n第二章\n第二段。',
+      chapters: [
+        { title: '第一章', level: 'chapter' as const, startLine: 0, paragraphs: ['第一段。'] },
+        { title: '第二章', level: 'chapter' as const, startLine: 2, paragraphs: ['第二段。'] }
+      ]
+    }
+    await books.writeBook({ ...files, original: Buffer.from([0x41, 0x42]) })
+    expect((await books.readBook('book-5')).original).toEqual(Buffer.from([0x41, 0x42]))
+
+    await books.writeBook(files)
+    expect((await books.readBook('book-5')).original).toEqual(Buffer.from([0x41, 0x42]))
+
+    await books.writeBook({ ...files, original: null })
+    expect((await books.readBook('book-5')).original).toBeUndefined()
+  })
 })

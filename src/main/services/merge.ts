@@ -156,7 +156,8 @@ export class MergeService {
       )
 
       await this.books.createMergeRestorePoint(targetId, sourceId, target, source)
-      await this.books.writeBook(documents, { backup: false })
+      // A merged book no longer matches either original file's bytes.
+      await this.books.writeBook({ ...documents, original: null }, { backup: false })
       await this.books.writeProgress(targetId, { progress, bookmarks })
 
       const nextEntries = entries

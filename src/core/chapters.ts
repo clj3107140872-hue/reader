@@ -121,13 +121,13 @@ export function splitChapters(text: string): SplitResult {
 
 export function splitAtMarkerLines(text: string, markerLines: number[]): SplitResult {
   const lines = text.split(/\r\n|\r|\n/)
-  const candidates: Candidate[] = markerLines
-    .filter((line) => line >= 0 && line < lines.length)
+  const unique = [...new Set(markerLines)]
+    .filter((line) => line >= 0 && line < lines.length && lines[line].trim() !== '')
     .sort((a, b) => a - b)
-    .map((line) => {
-      const hit = isChapterTitleLine(lines[line])
-      return { line, title: lines[line].trim(), level: hit?.level ?? 'chapter' }
-    })
+  const candidates: Candidate[] = unique.map((line) => {
+    const hit = isChapterTitleLine(lines[line])
+    return { line, title: lines[line].trim(), level: hit?.level ?? 'chapter' }
+  })
 
   if (candidates.length === 0) return splitChapters(text)
   return buildFromCandidates(lines, candidates)

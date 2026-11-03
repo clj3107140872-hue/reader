@@ -10,6 +10,8 @@ export interface BookDocumentsInput {
   chapters: CleanedChapter[]
   /** Keep an existing source file; otherwise rebuild it from the chapters. */
   sourceText?: string
+  /** Manual chapter markers to persist; omit for auto-split books. */
+  chapterStarts?: number[]
 }
 
 export interface BookDocuments {
@@ -31,6 +33,7 @@ export function buildBookDocuments(input: BookDocumentsInput): BookDocuments {
       title: input.title,
       encoding: input.encoding,
       chapters: buildChapterMetas(chapters),
+      ...(input.chapterStarts ? { chapterStarts: input.chapterStarts } : {}),
       createdAt: input.createdAt
     },
     sourceText: input.sourceText ?? serializeChapters(chapters),

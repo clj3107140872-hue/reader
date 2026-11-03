@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron'
 import type { MessageBoxOptions, OpenDialogOptions, WebContents } from 'electron'
 import { join } from 'node:path'
 import type { AppSettings, BookProgress } from '../core/model'
+import type { SupportedEncoding } from '../shared/encodings'
 import type { CleaningConfig, NewBookmark, StartupNotice } from '../shared/api'
 import type { SettingsPatch } from '../shared/settings'
 import { BackupService } from './services/backup'
@@ -260,6 +261,28 @@ if (hasSingleInstanceLock) {
     )
     ipcMain.handle('book:reclean', (_event, id: string) => reprocess.reclean(id))
     ipcMain.handle('book:resplit', (_event, id: string) => reprocess.resplit(id))
+    ipcMain.handle('book:chapter-lines', (_event, id: string) => reprocess.chapterLines(id))
+    ipcMain.handle('book:apply-chapter-starts', (_event, id: string, starts: number[]) =>
+      reprocess.applyChapterStarts(id, starts)
+    )
+    ipcMain.handle('book:encoding-preview', (_event, id: string, encoding: SupportedEncoding) =>
+      reprocess.encodingPreview(id, encoding)
+    )
+    ipcMain.handle('book:apply-encoding', (_event, id: string, encoding: SupportedEncoding) =>
+      reprocess.applyEncoding(id, encoding)
+    )
+    ipcMain.handle('book:attach-original', async (event, id: string) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const options: OpenDialogOptions = {
+        properties: ['openFile'],
+        filters: [{ name: '文本文件', extensions: ['txt'] }]
+      }
+      const selection = win
+        ? await dialog.showOpenDialog(win, options)
+        : await dialog.showOpenDialog(options)
+      if (selection.canceled || selection.filePaths.length === 0) return null
+      return reprocess.attachOriginal(id, selection.filePaths[0])
+    })
     ipcMain.handle('cleaning:get-config', () => cleaning.getConfig())
     ipcMain.handle('cleaning:save-config', (_event, config: CleaningConfig) =>
       cleaning.saveConfig(config)
