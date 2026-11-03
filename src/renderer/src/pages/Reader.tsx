@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent, Ref } from 'react'
 import type {
   AppSettings,
   BookMeta,
@@ -10,7 +10,7 @@ import type {
 } from '../../../core/model'
 import { splitParagraphs } from '../../../core/paragraphs'
 import type { OpenBookPayload, WindowResizeEdge } from '../../../shared/api'
-import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../../shared/settings'
+import { DISGUISE_OPTIONS, FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../../shared/settings'
 import type { SettingsPatch } from '../../../shared/settings'
 import BookmarksPanel from '../components/BookmarksPanel'
 import ProgressBar from '../components/ProgressBar'
@@ -78,9 +78,12 @@ const NOTEPAD_MENUS = ['文件', '编辑', '格式', '查看', '帮助'] as cons
 
 const RESIZE_EDGES: WindowResizeEdge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 const CODE_COLUMN_KEY = 'reader.codeColumnWidth'
-const CODE_COLUMN_MIN = 160
+/** Narrow enough to tuck the novel into a sliver next to the code. */
+const CODE_COLUMN_MIN = 64
 /** 58px gutter, 8px drag handle and the 8px gap before the window edge. */
 const CODE_COLUMN_CHROME = 74
+/** Matches .vscode-code-row line-height. */
+const CODE_ROW_HEIGHT = 20
 
 function readCodeColumnWidth(): number | null {
   try {
@@ -153,40 +156,107 @@ function highlightCode(line: string): CodeToken[] {
   return tokens
 }
 
-/** Decorative code that stays put above and below the scrolling comments. */
-const CODE_TOP = [
-  "import { Novel } from './novel'",
-  '',
-  'const chapter = new Novel({',
-  "  title: '工作文档',",
-  "  mode: 'reading',",
-  '  autoSave: true',
-  '})',
-  ''
-]
-
-const CODE_BOTTOM = [
-  '',
-  'export function readChapter() {',
-  '  return chapter.next()',
-  '}',
-  '',
-  '// TODO: keep reading'
-]
-
-/** The bottom block pretends the file has scrolled much further down. */
-const CODE_BOTTOM_START = 412
-
-const COMMENT_LINE_NUMBERS = Array.from({ length: 80 }, (_, index) => 9 + index)
+/**
+ * A long, believable source file. The editor shows the slice that fits above
+ * and below the comment block, so the line numbers read as one continuous file
+ * no matter how tall the window is.
+ */
+const CODE_FILE: string[] = (() => {
+  const lines = [
+    '// reader.js — 工作文档解析',
+    "import { promises as fs } from 'node:fs'",
+    "import { createHash } from 'node:crypto'",
+    "import { join, extname, basename } from 'node:path'",
+    '',
+    'const CACHE_LIMIT = 64',
+    "const DEFAULT_ENCODING = 'utf8'",
+    'const PAGE_WINDOW = 240',
+    '',
+    'export async function loadDocument(file, options = {}) {',
+    '  const buffer = await fs.readFile(file)',
+    "  const encoding = options.encoding ?? detectEncoding(buffer)",
+    '  const text = buffer.toString(encoding)',
+    '  return { file, encoding, text, size: buffer.byteLength }',
+    '}',
+    '',
+    'export function detectEncoding(buffer) {',
+    "  if (buffer[0] === 0xef && buffer[1] === 0xbb) return 'utf8'",
+    "  if (buffer[0] === 0xff && buffer[1] === 0xfe) return 'utf16le'",
+    "  return buffer.includes(0x00) ? 'utf16le' : DEFAULT_ENCODING",
+    '}',
+    ''
+  ]
+  const names = [
+    'normalizeLine',
+    'splitChapters',
+    'parseTitle',
+    'stripAds',
+    'hashTitle',
+    'mergeParagraphs',
+    'measurePages',
+    'buildIndex',
+    'resolveRule',
+    'applyCleaning'
+  ]
+  names.forEach((name, index) => {
+    const id = index + 1
+    lines.push(
+      `export function ${name}${id}(input, options = {}) {`,
+      "  const source = String(input ?? '')",
+      `  const limit = options.limit ?? ${id * 12}`,
+      '  const rows = source.split(/\\r?\\n/).slice(0, limit)',
+      '  const result = rows.map((line, position) => ({',
+      '    position,',
+      '    text: line.trim(),',
+      `    key: createHash('sha1').update(line).digest('hex').slice(0, ${8 + (index % 5)})`,
+      '  }))',
+      '  return result.filter((item) => item.text.length > 0)',
+      '}',
+      ''
+    )
+  })
+  lines.push(
+    'export function readChapter(document, index, cache = new Map()) {',
+    '  const key = `${document.file}:${index}`',
+    '  if (cache.has(key)) return cache.get(key)',
+    '  const chapter = splitChapters2(document.text)[index]',
+    '  if (!chapter) return null',
+    '  cache.set(key, { ...chapter, encoding: document.encoding })',
+    '  if (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value)',
+    '  return chapter',
+    '}',
+    '',
+    'export function buildWindow(document, position) {',
+    '  const page = Math.floor(position / PAGE_WINDOW)',
+    '  const offset = page * PAGE_WINDOW',
+    '  return { page, offset, end: offset + PAGE_WINDOW }',
+    '}',
+    '',
+    'export function formatProgress(read, total) {',
+    '  const percent = total > 0 ? Math.min(100, (read / total) * 100) : 0',
+    '  return `${percent.toFixed(2)}%`',
+    '}',
+    '',
+    'export default {',
+    '  loadDocument,',
+    '  detectEncoding,',
+    '  readChapter,',
+    '  buildWindow,',
+    '  formatProgress',
+    '}'
+  )
+  return lines
+})()
 
 interface CodeRowsProps {
   lines: string[]
   start: number
+  paneRef?: Ref<HTMLDivElement>
 }
 
-function CodeRows({ lines, start }: CodeRowsProps) {
+function CodeRows({ lines, start, paneRef }: CodeRowsProps) {
   return (
-    <div className="vscode-code" aria-hidden="true">
+    <div className="vscode-code" aria-hidden="true" ref={paneRef}>
       {lines.map((line, index) => (
         <div className="vscode-code-row" key={index}>
           <span className="vscode-line-number">{start + index}</span>
@@ -304,10 +374,17 @@ export default function Reader({
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
   const [backdropDark, setBackdropDark] = useState(false)
   const [codeColumnWidth, setCodeColumnWidth] = useState<number | null>(readCodeColumnWidth)
+  const [disguiseMenuOpen, setDisguiseMenuOpen] = useState(false)
+  const [disguiseHint, setDisguiseHint] = useState('')
+  const [codeRows, setCodeRows] = useState(10)
+  const [commentRows, setCommentRows] = useState(10)
   const style = settings.slacking.disguise
   const disguised = style !== 'none'
   const scrollRef = useRef<HTMLElement | null>(null)
   const bandRef = useRef<HTMLDivElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const editorRef = useRef<HTMLDivElement | null>(null)
+  const codePaneRef = useRef<HTMLDivElement | null>(null)
   const columnDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const restoredRef = useRef(false)
   const rafRef = useRef(0)
@@ -346,6 +423,49 @@ export default function Reader({
   useEffect(() => {
     if (disguised) setDrawer(null)
   }, [disguised])
+
+  useEffect(() => {
+    if (!disguiseMenuOpen) return
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setDisguiseMenuOpen(false)
+      }
+    }
+    window.addEventListener('pointerdown', handlePointerDown)
+    return () => window.removeEventListener('pointerdown', handlePointerDown)
+  }, [disguiseMenuOpen])
+
+  // The × is deliberately absent, so tell people how to get out every time a
+  // disguise opens (including when a window is recreated for another style).
+  useEffect(() => {
+    if (!disguised) {
+      setDisguiseHint('')
+      return
+    }
+    setDisguiseHint('摸鱼模式：按 Esc 退出')
+    const timer = window.setTimeout(() => setDisguiseHint(''), 4000)
+    return () => window.clearTimeout(timer)
+  }, [disguised, style])
+
+  // Measure the fixed code panes and the comment band so the fake file shows
+  // exactly as many line numbers as fit; ResizeObserver keeps it in sync.
+  useEffect(() => {
+    if (style !== 'code') return
+    const pane = codePaneRef.current
+    const band = bandRef.current
+    if (!pane || !band) return
+    const measure = (): void => {
+      setCodeRows(Math.max(2, Math.floor(pane.getBoundingClientRect().height / CODE_ROW_HEIGHT)))
+      setCommentRows(
+        Math.max(2, Math.floor(band.getBoundingClientRect().height / CODE_ROW_HEIGHT))
+      )
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(pane)
+    observer.observe(band)
+    return () => observer.disconnect()
+  }, [book, style])
 
   // Disguised reads rename the OS window too, otherwise the taskbar gives it away.
   const disguiseTitle = style === 'none' ? null : DISGUISE_TITLES[style]
@@ -551,7 +671,10 @@ export default function Reader({
 
   useEffect(() => {
     const scroller = scrollRef.current
-    if (!scroller) return
+    // In code mode the wheel belongs to the whole fake editor, not just the
+    // comment column, so scrolling over the code still moves the novel.
+    const target = style === 'code' ? editorRef.current : scroller
+    if (!scroller || !target) return
 
     // Native wheel scrolling animates the full 100px notch, which blurs the
     // text while it moves. Scroll a shorter distance and land on it at once
@@ -564,9 +687,9 @@ export default function Reader({
       scroller.scrollTop += event.deltaY * WHEEL_DISTANCE_SCALE
     }
 
-    scroller.addEventListener('wheel', handleWheel, { passive: false })
-    return () => scroller.removeEventListener('wheel', handleWheel)
-  }, [book])
+    target.addEventListener('wheel', handleWheel, { passive: false })
+    return () => target.removeEventListener('wheel', handleWheel)
+  }, [book, style])
 
   const seek = (percent: number): void => {
     if (!book) return
@@ -713,6 +836,13 @@ export default function Reader({
         return
       }
 
+      // Esc closes the style chooser before it closes anything else.
+      if (event.key === 'Escape' && disguiseMenuOpen) {
+        event.preventDefault()
+        setDisguiseMenuOpen(false)
+        return
+      }
+
       // Reader shortcuts would expose the disguise; only paging keys stay.
       if ((event.ctrlKey || event.metaKey) && disguised) return
 
@@ -781,6 +911,7 @@ export default function Reader({
   }, [
     changeFontSize,
     current.chapterIndex,
+    disguiseMenuOpen,
     disguised,
     drawer,
     jumpToChapter,
@@ -847,13 +978,37 @@ export default function Reader({
           <button className="ghost" onClick={() => setDrawer('settings')}>
             设置
           </button>
-          <button
-            className="ghost slacking-entry"
-            onClick={() => setDisguiseStyle('notepad')}
-            title="伪装成记事本，按 Esc 退出；其它样式在设置里选"
-          >
-            摸鱼
-          </button>
+          <div className="disguise-menu-wrap" ref={menuRef}>
+            <button
+              className="ghost slacking-entry"
+              onClick={() => setDisguiseMenuOpen((open) => !open)}
+              aria-haspopup="menu"
+              aria-expanded={disguiseMenuOpen}
+              title="选择摸鱼样式，按 Esc 退出"
+            >
+              摸鱼
+            </button>
+            {disguiseMenuOpen && (
+              <div className="disguise-menu" role="menu">
+                <span className="disguise-menu-title">选择摸鱼样式</span>
+                {DISGUISE_OPTIONS.filter((option) => option.id !== 'none').map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    role="menuitem"
+                    data-style={option.id}
+                    onClick={() => {
+                      setDisguiseMenuOpen(false)
+                      setDisguiseStyle(option.id)
+                    }}
+                  >
+                    <span>{option.label}</span>
+                    <small>{option.hint}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </header>
       )}
 
@@ -877,17 +1032,6 @@ export default function Reader({
 
       {(style === 'transparent' || style === 'code') && <WindowResizeHandles />}
 
-      {(style === 'transparent' || style === 'code') && (
-        <button
-          className="disguise-exit"
-          onClick={() => setDisguiseStyle('none')}
-          title="退出伪装（Esc）"
-          aria-label="退出伪装"
-        >
-          ×
-        </button>
-      )}
-
       {book.warnings.length > 0 && !warningHidden && !disguised && (
         <div className="reader-warning" role="status">
           <span>{book.warnings.join('；')}</span>
@@ -898,13 +1042,15 @@ export default function Reader({
       )}
 
       {style === 'code' ? (
-        <div className="vscode-editor">
-          <CodeRows lines={CODE_TOP} start={1} />
+        <div className="vscode-editor" ref={editorRef}>
+          <CodeRows lines={CODE_FILE.slice(0, codeRows)} start={1} paneRef={codePaneRef} />
           <div className="vscode-comment-band" ref={bandRef}>
             <div className="vscode-comment-gutter" aria-hidden="true">
-              {COMMENT_LINE_NUMBERS.map((line) => (
-                <span key={line}>{line}</span>
-              ))}
+              {Array.from({ length: commentRows }, (_, index) => codeRows + index + 1).map(
+                (line) => (
+                  <span key={line}>{line}</span>
+                )
+              )}
             </div>
             <main
               className="reader-scroll vscode-comment-scroll"
@@ -929,7 +1075,10 @@ export default function Reader({
             />
             <div className="vscode-comment-filler" aria-hidden="true" />
           </div>
-          <CodeRows lines={CODE_BOTTOM} start={CODE_BOTTOM_START} />
+          <CodeRows
+            lines={CODE_FILE.slice(codeRows + commentRows, codeRows * 2 + commentRows)}
+            start={codeRows + commentRows + 1}
+          />
         </div>
       ) : (
         <main
@@ -1014,7 +1163,11 @@ export default function Reader({
         </>
       )}
 
-      {notice && <div className="reader-notice">{notice}</div>}
+      {(notice || disguiseHint) && (
+        <div className={`reader-notice${disguiseHint && !notice ? ' disguise-hint' : ''}`}>
+          {notice || disguiseHint}
+        </div>
+      )}
     </div>
   )
 }

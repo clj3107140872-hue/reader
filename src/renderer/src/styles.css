@@ -181,6 +181,43 @@ body[data-slacking='code'] { background: #1e1e1e; }
 .reader-toolbar .ghost:hover { background: var(--reader-hover); }
 .reader-title { font-size: 14px; color: var(--reader-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .toolbar-spacer { flex: 1 1 auto; }
+/* Toolbar entry for picking a disguise without opening the settings drawer. */
+.disguise-menu-wrap { position: relative; }
+.disguise-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 80;
+  width: 260px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--reader-panel-strong);
+  border: 1px solid var(--reader-border);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+.disguise-menu-title {
+  padding: 6px 10px 4px;
+  font-size: 12px;
+  color: var(--reader-muted);
+}
+.disguise-menu button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--reader-text);
+  text-align: left;
+  cursor: pointer;
+}
+.disguise-menu button:hover { background: var(--reader-hover); }
+.disguise-menu button span { font-size: 13px; }
+.disguise-menu button small { font-size: 11px; line-height: 1.5; color: var(--reader-muted); }
 .reader-warning {
   flex: 0 0 auto;
   display: flex;
@@ -673,29 +710,6 @@ body[data-slacking='code'] { background: #1e1e1e; }
   z-index: 30;
   -webkit-app-region: drag;
 }
-.disguise-exit {
-  position: fixed;
-  top: 6px;
-  right: 10px;
-  z-index: 46;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--reader-muted);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0.2;
-  -webkit-app-region: no-drag;
-}
-.disguise-exit:hover {
-  opacity: 1;
-  background: rgba(127, 127, 127, 0.18);
-}
-
 /* Frameless disguise windows resize through these invisible edge strips. */
 .window-resize {
   position: fixed;
@@ -748,13 +762,12 @@ body[data-slacking='code'] { background: #1e1e1e; }
   color: #d4d4d4;
   overflow: hidden;
 }
-.reader[data-slacking='code'] .disguise-exit { color: #cccccc; }
 .vscode-tabbar {
   flex: 0 0 auto;
   height: 35px;
   display: flex;
   align-items: stretch;
-  padding-right: 44px;
+  padding-right: 16px;
   background: #252526;
   user-select: none;
   -webkit-app-region: drag;
@@ -778,9 +791,10 @@ body[data-slacking='code'] { background: #1e1e1e; }
   background: #1e1e1e;
   overflow: hidden;
 }
-/* Short windows clip the fake code instead of starving the comments. */
+/* Code occupies the two thirds above and below the comment block. Both panes
+   share the leftover height; the comment band below keeps a fixed share. */
 .vscode-code {
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   overflow: hidden;
 }
@@ -812,7 +826,7 @@ body[data-slacking='code'] { background: #1e1e1e; }
 .tok-comment { color: #6a9955; }
 .tok-num { color: #b5cea8; }
 .vscode-comment-band {
-  flex: 1 1 auto;
+  flex: 0 0 34%;
   min-height: 96px;
   display: flex;
   /* Keep the column handle clear of the window's east resize strip. */
@@ -929,6 +943,8 @@ body[data-slacking='code'] { background: #1e1e1e; }
   border-radius: 6px;
   animation: toast-in 180ms ease-out;
 }
+/* Entering a disguise tells you the way out; it never gets in the way. */
+.disguise-hint { pointer-events: none; }
 
 .modal-backdrop {
   position: fixed;
