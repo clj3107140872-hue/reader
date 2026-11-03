@@ -361,6 +361,23 @@ body {
 .setting-row input[type='range'] { flex: 1 1 auto; accent-color: var(--reader-accent); }
 .setting-row output { flex: 0 0 48px; text-align: right; font-variant-numeric: tabular-nums; color: var(--reader-muted); }
 .inline-check { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; font-size: 12px; color: var(--reader-muted); }
+.theme-mode { display: flex; gap: 6px; margin-bottom: 10px; }
+.theme-mode-option {
+  flex: 1 1 auto;
+  padding: 7px 6px;
+  border: 1px solid var(--reader-border);
+  border-radius: 6px;
+  background: var(--reader-panel);
+  color: var(--reader-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.theme-mode-option.active {
+  border-color: var(--reader-accent);
+  background: var(--reader-hover);
+  color: var(--reader-accent);
+}
+.setting-hint { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--reader-muted); }
 .theme-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .theme-swatch {
   border: 1px solid var(--reader-border);

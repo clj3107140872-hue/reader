@@ -1,16 +1,34 @@
 import { useEffect, useState } from 'react'
 import type { AppSettings } from '../../core/model'
-import { DEFAULT_SETTINGS, mergeSettings } from '../../shared/settings'
+import { DEFAULT_SETTINGS, mergeSettings, resolveTheme } from '../../shared/settings'
 import type { SettingsPatch } from '../../shared/settings'
 import Library from './pages/Library'
 import Reader from './pages/Reader'
 
 type View = { name: 'library' } | { name: 'reader'; bookId: string }
 
+function useSystemPrefersDark(): boolean {
+  const [dark, setDark] = useState(
+    () => window.matchMedia('(prefers-color-scheme: dark)').matches
+  )
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-color-scheme: dark)')
+    const update = (event: MediaQueryListEvent): void => setDark(event.matches)
+    setDark(query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  return dark
+}
+
 export default function App() {
   const [view, setView] = useState<View>({ name: 'library' })
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [settingsError, setSettingsError] = useState('')
+  const systemPrefersDark = useSystemPrefersDark()
+  const theme = resolveTheme(settings, systemPrefersDark)
 
   useEffect(() => {
     void window.api
@@ -47,6 +65,7 @@ export default function App() {
         <Reader
           bookId={view.bookId}
           settings={settings}
+          theme={theme}
           onSettingsChange={updateSettings}
           onBack={() => setView({ name: 'library' })}
         />

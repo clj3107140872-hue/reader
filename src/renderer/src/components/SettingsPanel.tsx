@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react'
 import type { AppSettings, ThemeName } from '../../../core/model'
-import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../../shared/settings'
+import {
+  FONT_SIZE_MAX,
+  FONT_SIZE_MIN,
+  THEME_MODE_OPTIONS
+} from '../../../shared/settings'
 import type { SettingsPatch } from '../../../shared/settings'
 
 interface SettingsPanelProps {
   settings: AppSettings
+  /** Palette actually rendering after the day/night/system mode is applied. */
+  resolvedTheme: ThemeName
   onChange: (patch: SettingsPatch) => void
   onClose: () => void
 }
@@ -23,7 +29,12 @@ const FONTS = [
   { label: '仿宋', value: "'FangSong', 'STFangsong', serif" }
 ]
 
-export default function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProps) {
+export default function SettingsPanel({
+  settings,
+  resolvedTheme,
+  onChange,
+  onClose
+}: SettingsPanelProps) {
   const typography = settings.typography
   const fonts = FONTS.some((font) => font.value === typography.fontFamily)
     ? FONTS
@@ -57,17 +68,39 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
 
       <section className="setting-group">
         <h3>主题</h3>
+        <div className="theme-mode" role="group" aria-label="日夜模式">
+          {THEME_MODE_OPTIONS.map((mode) => (
+            <button
+              key={mode.id}
+              className={`theme-mode-option ${settings.themeMode === mode.id ? 'active' : ''}`}
+              onClick={() => onChange({ themeMode: mode.id })}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
         <div className="theme-grid">
           {THEMES.map((theme) => (
             <button
               key={theme.id}
-              className={`theme-swatch ${theme.id} ${settings.theme === theme.id ? 'active' : ''}`}
-              onClick={() => onChange({ theme: theme.id })}
+              className={`theme-swatch ${theme.id} ${resolvedTheme === theme.id ? 'active' : ''}`}
+              onClick={() =>
+                onChange(
+                  theme.id === 'dark'
+                    ? { themeMode: 'night' }
+                    : { themeMode: 'day', theme: theme.id }
+                )
+              }
             >
               {theme.label}
             </button>
           ))}
         </div>
+        {settings.themeMode === 'system' && (
+          <p className="setting-hint">
+            跟随系统：系统为浅色时使用所选日间配色，系统切换到深色时自动使用深色。
+          </p>
+        )}
       </section>
 
       <section className="setting-group">

@@ -1,8 +1,9 @@
-import type { AppSettings, ThemeName } from '../core/model'
+import type { AppSettings, ThemeMode, ThemeName } from '../core/model'
 
 export const DEFAULT_SETTINGS: AppSettings = {
   version: 1,
   theme: 'light',
+  themeMode: 'day',
   typography: {
     fontFamily: "'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif",
     fontSize: 18,
@@ -19,6 +20,36 @@ export const FONT_SIZE_MIN = 12
 export const FONT_SIZE_MAX = 36
 
 const THEMES: ThemeName[] = ['light', 'dark', 'green', 'sepia']
+const THEME_MODES: ThemeMode[] = ['day', 'night', 'system']
+
+export const THEME_MODE_OPTIONS: { id: ThemeMode; label: string }[] = [
+  { id: 'day', label: '日间' },
+  { id: 'night', label: '夜间' },
+  { id: 'system', label: '跟随系统' }
+]
+
+/** Picks the palette that should actually render for the current mode. */
+export function resolveTheme(settings: AppSettings, systemPrefersDark: boolean): ThemeName {
+  if (settings.themeMode === 'night') return 'dark'
+  if (settings.themeMode === 'system' && systemPrefersDark) return 'dark'
+  // Older settings may still carry the dark palette as their base theme.
+  return settings.theme === 'dark' ? 'light' : settings.theme
+}
+
+function normalizeTheme(raw: Partial<AppSettings>): { theme: ThemeName; themeMode: ThemeMode } {
+  const requested = THEMES.includes(raw.theme as ThemeName) ? (raw.theme as ThemeName) : undefined
+  const requestedMode = THEME_MODES.includes(raw.themeMode as ThemeMode)
+    ? (raw.themeMode as ThemeMode)
+    : undefined
+  // Older versions stored the dark palette directly; keep that choice as night mode.
+  if (requested === 'dark') {
+    return { theme: DEFAULT_SETTINGS.theme, themeMode: requestedMode ?? 'night' }
+  }
+  return {
+    theme: requested ?? DEFAULT_SETTINGS.theme,
+    themeMode: requestedMode ?? DEFAULT_SETTINGS.themeMode
+  }
+}
 
 function clamp(value: unknown, min: number, max: number, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
@@ -27,6 +58,7 @@ function clamp(value: unknown, min: number, max: number, fallback: number): numb
 
 export interface SettingsPatch {
   theme?: ThemeName
+  themeMode?: ThemeMode
   typography?: Partial<AppSettings['typography']>
   cleaning?: Partial<AppSettings['cleaning']>
   window?: Partial<AppSettings['window']>
@@ -38,10 +70,12 @@ export function normalizeSettings(input: unknown): AppSettings {
   const cleaning = (raw.cleaning ?? {}) as Partial<AppSettings['cleaning']>
   const windowState = (raw.window ?? {}) as Partial<AppSettings['window']>
   const maxWidth = typography.maxContentWidth
+  const { theme, themeMode } = normalizeTheme(raw)
 
   return {
     version: 1,
-    theme: THEMES.includes(raw.theme as ThemeName) ? (raw.theme as ThemeName) : DEFAULT_SETTINGS.theme,
+    theme,
+    themeMode,
     typography: {
       fontFamily:
         typeof typography.fontFamily === 'string' && typography.fontFamily.trim()

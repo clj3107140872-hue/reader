@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SettingsRepository } from '../src/main/storage/settings'
-import { DEFAULT_SETTINGS, mergeSettings, normalizeSettings } from '../src/shared/settings'
+import {
+  DEFAULT_SETTINGS,
+  mergeSettings,
+  normalizeSettings,
+  resolveTheme
+} from '../src/shared/settings'
 
 let root = ''
 
@@ -23,6 +28,20 @@ describe('normalizeSettings', () => {
       theme: 'light',
       typography: { fontSize: 36 }
     })
+  })
+
+  it('migrates a legacy dark theme to night mode', () => {
+    const settings = normalizeSettings({ theme: 'dark' })
+    expect(settings.theme).toBe('light')
+    expect(settings.themeMode).toBe('night')
+  })
+
+  it('resolves day, night and system modes', () => {
+    const settings = normalizeSettings({ theme: 'green', themeMode: 'system' })
+    expect(resolveTheme(settings, false)).toBe('green')
+    expect(resolveTheme(settings, true)).toBe('dark')
+    expect(resolveTheme({ ...settings, themeMode: 'day' }, true)).toBe('green')
+    expect(resolveTheme({ ...settings, themeMode: 'night' }, false)).toBe('dark')
   })
 
   it('keeps valid disabled built-in rule ids and drops junk', () => {
@@ -44,9 +63,10 @@ describe('SettingsRepository', () => {
   it('persists updates and merges nested patches', async () => {
     const repo = new SettingsRepository(root)
     expect(await repo.read()).toEqual(DEFAULT_SETTINGS)
-    await repo.update({ theme: 'dark', typography: { lineHeight: 2 } })
+    await repo.update({ themeMode: 'night', typography: { lineHeight: 2 } })
     const stored = await repo.read()
-    expect(stored.theme).toBe('dark')
+    expect(stored.themeMode).toBe('night')
+    expect(stored.theme).toBe('light')
     expect(stored.typography.lineHeight).toBe(2)
     expect(stored.typography.fontSize).toBe(DEFAULT_SETTINGS.typography.fontSize)
   })

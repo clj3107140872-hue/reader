@@ -79,6 +79,7 @@ export interface AdRule {
 }
 
 export type ThemeName = 'light' | 'dark' | 'green' | 'sepia'
+export type ThemeMode = 'day' | 'night' | 'system'
 
 export interface TypographySettings {
   fontFamily: string
@@ -91,7 +92,9 @@ export interface TypographySettings {
 
 export interface AppSettings {
   version: 1
+  /** Day palette; night mode always renders the dark palette. */
   theme: ThemeName
+  themeMode: ThemeMode
   typography: TypographySettings
   cleaning: { enabled: boolean; disabledBuiltinIds: string[] }
   window: { width: number; height: number; x?: number; y?: number; maximized: boolean }

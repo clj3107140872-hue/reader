@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { AppSettings, BookMeta, Bookmark, BookProgress } from '../../../core/model'
+import type { AppSettings, BookMeta, Bookmark, BookProgress, ThemeName } from '../../../core/model'
 import { splitParagraphs } from '../../../core/paragraphs'
 import type { OpenBookPayload } from '../../../shared/api'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../../shared/settings'
@@ -22,6 +22,8 @@ import {
 interface ReaderProps {
   bookId: string
   settings: AppSettings
+  /** Effective palette after applying the day/night/system mode. */
+  theme: ThemeName
   onSettingsChange: (patch: SettingsPatch) => void
   onBack: () => void
 }
@@ -85,7 +87,13 @@ const ReaderBody = memo(function ReaderBody({ chapters }: { chapters: ChapterVie
   )
 })
 
-export default function Reader({ bookId, settings, onSettingsChange, onBack }: ReaderProps) {
+export default function Reader({
+  bookId,
+  settings,
+  theme,
+  onSettingsChange,
+  onBack
+}: ReaderProps) {
   const [book, setBook] = useState<OpenBookPayload | null>(null)
   const [error, setError] = useState('')
   const [drawer, setDrawer] = useState<'toc' | 'search' | 'bookmarks' | 'settings' | null>(null)
@@ -515,7 +523,7 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
   const remainingMinutes = Math.max(0, Math.ceil((total - read) / 400))
 
   return (
-    <div className="reader" data-theme={settings.theme} style={readerStyle}>
+    <div className="reader" data-theme={theme} style={readerStyle}>
       <header className="reader-toolbar">
         <button className="ghost" onClick={onBack}>
           ← 书架
@@ -580,6 +588,7 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
       {drawer === 'settings' && (
         <SettingsPanel
           settings={settings}
+          resolvedTheme={theme}
           onChange={onSettingsChange}
           onClose={() => setDrawer(null)}
         />
