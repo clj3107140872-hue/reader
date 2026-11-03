@@ -5,10 +5,12 @@ import type {
   FindMergesResult,
   ImportSummary,
   ImportSuspect,
-  MergeCandidate
+  MergeCandidate,
+  ReprocessResult
 } from '../../../shared/api'
 import BookCard from '../components/BookCard'
 import BookInfo from '../components/BookInfo'
+import CleaningDialog from '../components/CleaningDialog'
 import HoverCard from '../components/HoverCard'
 import Modal from '../components/Modal'
 import { errorText } from '../errors'
@@ -59,6 +61,12 @@ type Dialog =
   | { kind: 'delete'; entry: LibraryEntry }
   | { kind: 'reclean'; entry: LibraryEntry }
   | { kind: 'resplit'; entry: LibraryEntry }
+  | { kind: 'cleaning'; bookId: string | null; tab: 'report' | 'rules' }
+
+interface ToastAction {
+  label: string
+  run: () => void
+}
 
 const SORTERS: Record<SortMode, (a: LibraryEntry, b: LibraryEntry) => number> = {
   recent: (a, b) => (b.lastReadAt ?? b.importedAt).localeCompare(a.lastReadAt ?? a.importedAt),
@@ -76,13 +84,13 @@ const STAGE_LABELS: Record<string, string> = {
 function clampMenu(x: number, y: number): { x: number; y: number } {
   return {
     x: Math.max(8, Math.min(x, window.innerWidth - 168)),
-    y: Math.max(8, Math.min(y, window.innerHeight - 196))
+    y: Math.max(8, Math.min(y, window.innerHeight - 232))
   }
 }
 
 export default function Library({ onOpen }: { onOpen: (bookId: string) => void }) {
   const [entries, setEntries] = useState<LibraryEntry[]>([])
-  const [toast, setToast] = useState<{ id: number; text: string } | null>(null)
+  const [toast, setToast] = useState<{ id: number; text: string; action?: ToastAction } | null>(null)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
   const [sort, setSort] = useState<SortMode>('recent')
@@ -110,7 +118,8 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   const hoverTimer = useRef<number | null>(null)
   const busyRef = useRef(false)
 
-  const notify = (text: string): void => setToast({ id: Date.now(), text })
+  const notify = (text: string, action?: ToastAction): void =>
+    setToast({ id: Date.now(), text, action })
 
   const clearHoverTimer = (): void => {
     if (hoverTimer.current !== null) {
@@ -330,7 +339,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
 
   useEffect(() => {
     if (!toast) return
-    const timer = window.setTimeout(() => setToast(null), 5000)
+    const timer = window.setTimeout(() => setToast(null), toast.action ? 8000 : 5000)
     return () => window.clearTimeout(timer)
   }, [toast])
 
@@ -384,7 +393,16 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     if (summary.duplicates.length > 0) parts.push(`已在书库：${limitedJoin(summary.duplicates)}`)
     if (summary.errors.length > 0) parts.push(`失败：${limitedJoin(summary.errors)}`)
     if (summary.warnings.length > 0) parts.push(`提示：${limitedJoin(summary.warnings)}`)
-    notify(parts.length > 0 ? parts.join(' ｜ ') : '没有导入任何文件')
+    const latest = summary.importedBooks[summary.importedBooks.length - 1]
+    notify(
+      parts.length > 0 ? parts.join(' ｜ ') : '没有导入任何文件',
+      latest
+        ? {
+            label: '查看清洗报告',
+            run: () => setDialog({ kind: 'cleaning', bookId: latest.id, tab: 'report' })
+          }
+        : undefined
+    )
     if (summary.suspects.length > 0) setMergeQueue(summary.suspects)
     await refresh()
   }
@@ -530,6 +548,15 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     }
   }
 
+  const handleCleaningApplied = (result: ReprocessResult): void => {
+    setDialog(null)
+    const title = entries.find((entry) => entry.id === result.id)?.title ?? '这本书'
+    notify(
+      `已清洗《${title}》：移除广告 ${result.stats.adLinesRemoved} 行，合并重复段 ${result.stats.duplicateParagraphsMerged} 处`
+    )
+    void refresh().catch((reason) => notify(`书架刷新失败：${errorText(reason)}`))
+  }
+
   const sorted = [...entries].sort(SORTERS[sort])
   const mergePosition = mergeTotal > 0 ? mergeTotal - mergeCandidates.length + 1 : 0
   const confirmBackup = backupConfirm
@@ -562,6 +589,13 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
                 <option value="imported">导入时间</option>
                 <option value="title">书名</option>
               </select>
+              <button
+                className="ghost"
+                disabled={busy}
+                onClick={() => setDialog({ kind: 'cleaning', bookId: null, tab: 'rules' })}
+              >
+                清洗规则
+              </button>
               <button onClick={() => void handleImport()} disabled={busy}>
                 {busy ? '导入中…' : '导入 TXT'}
               </button>
@@ -610,7 +644,19 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
       )}
       {toast && (
         <div className="toast" role="status">
-          {toast.text}
+          <span>{toast.text}</span>
+          {toast.action && (
+            <button
+              className="toast-action"
+              onClick={() => {
+                const action = toast.action
+                setToast(null)
+                action?.run()
+              }}
+            >
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
       {dragging && !dialog && !pendingMerge && !selectionMode && (
@@ -671,6 +717,14 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
               }}
             >
               查看来源
+            </button>
+            <button
+              onClick={() => {
+                setDialog({ kind: 'cleaning', bookId: menu.entry.id, tab: 'report' })
+                setMenu(null)
+              }}
+            >
+              清洗报告…
             </button>
             <button
               onClick={() => {
@@ -781,6 +835,17 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
           </p>
           <p className="modal-note">合并后会保留阅读进度和书签，并自动备份原书数据。</p>
         </Modal>
+      )}
+
+      {dialog?.kind === 'cleaning' && (
+        <CleaningDialog
+          key={dialog.bookId ?? 'rules'}
+          bookId={dialog.bookId}
+          initialTab={dialog.tab}
+          notify={notify}
+          onClose={() => setDialog(null)}
+          onApplied={handleCleaningApplied}
+        />
       )}
 
       {dialog?.kind === 'source' && (

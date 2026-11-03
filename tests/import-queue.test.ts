@@ -104,6 +104,17 @@ describe('ImportQueue', () => {
     expect(summary.warnings[0]).toContain('无法读取文件信息')
   })
 
+  it('records imported books so the UI can open their cleaning report', async () => {
+    const file = join(root, '报告.txt')
+    await writeFile(file, iconv.encode(makeBookText(1, 3), 'utf8'))
+
+    const queue = new ImportQueue(new ImportService(library, books))
+    const summary = await queue.importFiles([file])
+    const entries = await library.list()
+
+    expect(summary.importedBooks).toEqual([{ id: entries[0].id, title: '报告' }])
+  })
+
   it('emits import stages in order', async () => {
     const file = join(root, '阶段.txt')
     await writeFile(file, iconv.encode(makeBookText(1, 3), 'utf8'))

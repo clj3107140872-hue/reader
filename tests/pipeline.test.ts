@@ -50,4 +50,26 @@ describe('parseBookFile', () => {
     expect(result.meta.chapters[0].simhash).toMatch(/^[0-9a-f]{16}$/)
     expect(result.meta.chapters[0].charCount).toBeGreaterThan(0)
   })
+
+  it('skips ad rules when cleaning is disabled', () => {
+    const buf = iconv.encode(makeBookText(3), 'utf8')
+    const result = parseBookFile(buf, '测试小说.txt', { adCleaning: false })
+    expect(result.stats.adLinesRemoved).toBe(0)
+    expect(result.chapters[0].paragraphs).toContain('www.example-ad.com')
+  })
+
+  it('uses supplied ad rules instead of adding built-ins', () => {
+    const text = makeBookText(3).replace(
+      '这是第1章的正文内容，用来测试导入流程是否稳定。',
+      '这是第1章的正文内容，广告字。'
+    )
+    const result = parseBookFile(iconv.encode(text, 'utf8'), '测试小说.txt', {
+      adRules: [
+        { id: 'custom', name: '自定义', type: 'line', pattern: '广告字', enabled: true }
+      ]
+    })
+    expect(result.stats.adLinesRemoved).toBe(1)
+    expect(result.chapters[0].paragraphs.join('')).not.toContain('广告字')
+    expect(result.chapters[0].paragraphs).toContain('www.example-ad.com')
+  })
 })

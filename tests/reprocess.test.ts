@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BookMeta } from '../src/core/model'
-import { chaptersFromLines } from '../src/core/reprocess'
+import { chapterFromLines, chaptersFromLines } from '../src/core/reprocess'
 
 function meta(): BookMeta {
   return {
@@ -82,5 +82,12 @@ describe('chaptersFromLines', () => {
   it('keeps the first line of a no-title chapter', () => {
     const chapters = chaptersFromLines('开头。\n第二段。', metaWith([{ title: '正文', startLine: 0 }]))
     expect(chapters.map((chapter) => chapter.paragraphs)).toEqual([['开头。', '第二段。']])
+  })
+})
+
+describe('chapterFromLines', () => {
+  it('rebuilds only the requested chapter', () => {
+    const chapter = chapterFromLines('第一章\n甲。\n第二章\n乙。\n丙。', meta(), 1)
+    expect(chapter).toEqual({ title: '第二章', level: 'chapter', startLine: 3, paragraphs: ['乙。', '丙。'] })
   })
 })

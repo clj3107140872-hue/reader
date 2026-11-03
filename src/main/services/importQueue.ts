@@ -30,6 +30,7 @@ export class ImportQueue {
   ): Promise<ImportSummary> {
     const summary: ImportSummary = {
       imported: 0,
+      importedBooks: [],
       duplicates: [],
       suspects: [],
       errors: [],
@@ -75,6 +76,7 @@ export class ImportQueue {
           continue
         }
         summary.imported += 1
+        summary.importedBooks.push({ id: outcome.entry.id, title: outcome.entry.title })
         summary.suspects.push(
           ...outcome.suspects.map((suspect) => ({
             ...suspect,

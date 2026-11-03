@@ -25,6 +25,13 @@ describe('normalizeSettings', () => {
     })
   })
 
+  it('keeps valid disabled built-in rule ids and drops junk', () => {
+    const cleaned = normalizeSettings({
+      cleaning: { enabled: false, disabledBuiltinIds: ['url', 42, '', 'site'] }
+    })
+    expect(cleaned.cleaning).toEqual({ enabled: false, disabledBuiltinIds: ['url', 'site'] })
+  })
+
   it('keeps a null max width and merges nested patches', () => {
     expect(normalizeSettings({ typography: { maxContentWidth: null } }).typography.maxContentWidth).toBeNull()
     const merged = mergeSettings(DEFAULT_SETTINGS, { typography: { fontSize: 22 } })

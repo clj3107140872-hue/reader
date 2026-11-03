@@ -1,4 +1,6 @@
+import type { CleanLineDetail } from '../core/cleaning'
 import type {
+  AdRule,
   AppSettings,
   BookMeta,
   Bookmark,
@@ -22,11 +24,58 @@ export interface ImportSuspect {
 
 export interface ImportSummary {
   imported: number
+  /** Imported books in import order, used to open the latest cleaning report. */
+  importedBooks: { id: string; title: string }[]
   duplicates: string[]
   suspects: ImportSuspect[]
   errors: string[]
   warnings: string[]
   canceled?: boolean
+}
+
+export interface CleaningConfig {
+  /** Global ad-cleaning switch; hygiene and duplicate merging still run when off. */
+  adCleaning: boolean
+  builtinRules: AdRule[]
+  userRules: AdRule[]
+}
+
+export interface CleaningRuleHit {
+  id: string
+  name: string
+  type: 'line' | 'sentence'
+  scope: 'builtin' | 'user'
+  hits: number
+}
+
+export interface CleaningChapterSummary {
+  index: number
+  title: string
+  adLinesRemoved: number
+  duplicateParagraphsMerged: number
+}
+
+export interface CleaningPreview {
+  bookId: string
+  title: string
+  adCleaning: boolean
+  chapterCount: number
+  /** Paragraphs left after the previewed cleaning. */
+  paragraphCount: number
+  adLinesRemoved: number
+  duplicateParagraphsMerged: number
+  ruleHits: CleaningRuleHit[]
+  chapters: CleaningChapterSummary[]
+  /** Stats currently stored on the library entry, i.e. what the book looks like now. */
+  appliedStats: ImportStats
+}
+
+export interface CleaningChapterDiff {
+  index: number
+  title: string
+  lines: CleanLineDetail[]
+  adLinesRemoved: number
+  duplicateParagraphsMerged: number
 }
 
 export interface MergeCandidate {
@@ -137,6 +186,14 @@ export interface ReaderApi {
   getStartupNotice(): Promise<StartupNotice>
   recleanBook(id: string): Promise<ReprocessResult>
   resplitBook(id: string): Promise<ReprocessResult>
+  getCleaningConfig(): Promise<CleaningConfig>
+  saveCleaningConfig(config: CleaningConfig): Promise<CleaningConfig>
+  previewCleaning(bookId: string, config?: CleaningConfig): Promise<CleaningPreview>
+  cleaningChapterDiff(
+    bookId: string,
+    chapterIndex: number,
+    config?: CleaningConfig
+  ): Promise<CleaningChapterDiff>
   searchBook(id: string, query: string, token: string): Promise<SearchResults>
   cancelSearch(token: string): Promise<void>
   onSearchProgress(cb: (payload: SearchProgress) => void): () => void

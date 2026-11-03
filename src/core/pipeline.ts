@@ -46,12 +46,20 @@ export function buildChapterMetas(chapters: CleanedChapter[]): ChapterMeta[] {
 export function parseBookFile(
   contents: Buffer,
   fileName: string,
-  options: { userRules?: AdRule[]; id?: string; now?: string } = {}
+  options: {
+    userRules?: AdRule[]
+    /** When supplied, replaces the built-in rules instead of extending them. */
+    adRules?: AdRule[]
+    adCleaning?: boolean
+    id?: string
+    now?: string
+  } = {}
 ): ParseBookResult {
   const decoded = decodeBook(contents)
   const repair = repairMojibake(decoded.text, decoded.encoding)
   const split = splitChapters(repair.text)
-  const cleaned = cleanChapters(split.chapters, [...BUILTIN_AD_RULES, ...(options.userRules ?? [])])
+  const adRules = options.adRules ?? [...BUILTIN_AD_RULES, ...(options.userRules ?? [])]
+  const cleaned = cleanChapters(split.chapters, adRules, { adCleaning: options.adCleaning })
 
   const paragraphCount = cleaned.chapters.reduce((total, chapter) => total + chapter.paragraphs.length, 0)
   if (paragraphCount === 0) throw new Error('文件没有可阅读的正文')

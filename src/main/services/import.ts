@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
-import type { AdRule, LibraryEntry } from '../../core/model'
+import { BUILTIN_AD_RULES } from '../../core/cleaning'
+import type { CleaningRunConfig } from '../../core/cleaning'
+import type { LibraryEntry } from '../../core/model'
 import { parseBookFile } from '../../core/pipeline'
 import { chapterMatchRate, normalizeBookTitle } from '../../core/sameBook'
 import type { BookRepository } from '../storage/book'
@@ -34,7 +36,10 @@ export class ImportService {
   constructor(
     private readonly library: LibraryRepository,
     private readonly books: BookRepository,
-    private readonly userRules: () => AdRule[] = () => []
+    private readonly cleaning: () => CleaningRunConfig = () => ({
+      adCleaning: true,
+      rules: BUILTIN_AD_RULES
+    })
   ) {}
 
   async importFile(
@@ -50,7 +55,11 @@ export class ImportService {
 
     const fileName = basename(filePath)
     onStage('parsing')
-    const parsed = parseBookFile(contents, fileName, { userRules: this.userRules() })
+    const cleaning = this.cleaning()
+    const parsed = parseBookFile(contents, fileName, {
+      adRules: cleaning.rules,
+      adCleaning: cleaning.adCleaning
+    })
 
     onStage('writing')
     await this.books.writeBook({

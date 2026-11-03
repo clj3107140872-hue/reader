@@ -29,6 +29,11 @@ const api: ReaderApi = {
   getStartupNotice: () => ipcRenderer.invoke('app:startup-notice'),
   recleanBook: (id) => ipcRenderer.invoke('book:reclean', id),
   resplitBook: (id) => ipcRenderer.invoke('book:resplit', id),
+  getCleaningConfig: () => ipcRenderer.invoke('cleaning:get-config'),
+  saveCleaningConfig: (config) => ipcRenderer.invoke('cleaning:save-config', config),
+  previewCleaning: (bookId, config) => ipcRenderer.invoke('cleaning:preview', bookId, config),
+  cleaningChapterDiff: (bookId, chapterIndex, config) =>
+    ipcRenderer.invoke('cleaning:chapter-diff', bookId, chapterIndex, config),
   searchBook: (id, query, token) => ipcRenderer.invoke('book:search', id, query, token),
   cancelSearch: (token) => ipcRenderer.invoke('search:cancel', token),
   onSearchProgress: (callback) => {

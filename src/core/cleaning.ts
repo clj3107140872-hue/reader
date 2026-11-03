@@ -22,69 +22,238 @@ export const BUILTIN_AD_RULES: AdRule[] = [
   }
 ]
 
-export interface CleanResult {
-  chapters: CleanedChapter[]
+export interface CleaningRunOptions {
+  /** When false, ad rules are skipped; hygiene and duplicate merging still run. */
+  adCleaning?: boolean
+}
+
+export interface CleaningRunConfig {
+  adCleaning: boolean
+  rules: AdRule[]
+}
+
+export type CleanRemovalKind = 'line' | 'sentence' | 'duplicate'
+
+export interface CleanLineSegment {
+  text: string
+  removed: boolean
+  kind?: CleanRemovalKind
+  ruleName?: string
+}
+
+export interface CleanLineDetail {
+  original: string
+  cleaned: string
+  segments: CleanLineSegment[]
+  removed: CleanRemovalKind | null
+}
+
+export interface CleanChapterDetail {
+  paragraphs: string[]
+  lines: CleanLineDetail[]
+  adLinesRemoved: number
+  duplicateParagraphsMerged: number
+  ruleHits: Record<string, number>
+}
+
+export interface CleanChapterStats {
   adLinesRemoved: number
   duplicateParagraphsMerged: number
 }
 
-export function cleanChapters(chapters: SplittedChapter[], rules: AdRule[]): CleanResult {
-  const lineRules: RegExp[] = []
-  const sentenceRules: RegExp[] = []
+export interface CleanResult {
+  chapters: CleanedChapter[]
+  adLinesRemoved: number
+  duplicateParagraphsMerged: number
+  ruleHits: Record<string, number>
+  chapterStats: CleanChapterStats[]
+}
+
+interface CompiledRule {
+  rule: AdRule
+  re: RegExp
+}
+
+interface CompiledRules {
+  line: CompiledRule[]
+  sentence: CompiledRule[]
+}
+
+interface ChapterRun extends CleanChapterDetail {}
+
+const SENTENCE_SPLIT = /(?<=[。！？!?…])(?![。！？!?…])/
+
+function compileRules(rules: AdRule[]): CompiledRules {
+  const line: CompiledRule[] = []
+  const sentence: CompiledRule[] = []
   for (const rule of rules) {
     if (!rule.enabled) continue
     try {
-      const compiled = new RegExp(rule.pattern)
-      if (rule.type === 'line') lineRules.push(compiled)
-      else if (rule.type === 'sentence') sentenceRules.push(compiled)
+      const re = new RegExp(rule.pattern)
+      if (rule.type === 'line') line.push({ rule, re })
+      else if (rule.type === 'sentence') sentence.push({ rule, re })
     } catch {
       // Malformed user rules are skipped instead of aborting the import.
     }
   }
+  return { line, sentence }
+}
 
+function bump(hits: Record<string, number>, id: string): void {
+  hits[id] = (hits[id] ?? 0) + 1
+}
+
+function cleanOneChapter(
+  chapter: SplittedChapter,
+  compiled: CompiledRules,
+  adCleaning: boolean,
+  recordLines: boolean
+): ChapterRun {
+  const paragraphs: string[] = []
+  const lines: CleanLineDetail[] = []
+  const ruleHits: Record<string, number> = {}
+  let previous = ''
   let adLinesRemoved = 0
   let duplicateParagraphsMerged = 0
 
-  const cleaned = chapters.map((chapter): CleanedChapter => {
-    const paragraphs: string[] = []
-    let previous = ''
+  for (const raw of chapter.paragraphs) {
+    const line = stripZeroWidth(raw).replace(/　/g, ' ').trim()
+    if (!line) continue
 
-    for (const raw of chapter.paragraphs) {
-      const line = stripZeroWidth(raw).replace(/\u3000/g, ' ').trim()
-      if (!line) continue
-
-      if (lineRules.some((re) => re.test(line))) {
+    if (adCleaning) {
+      const lineHit = compiled.line.find(({ re }) => re.test(line))
+      if (lineHit) {
         adLinesRemoved++
-        continue
-      }
-
-      let text = line
-      if (line.length <= 30) {
-        const sentences = line.split(/(?<=[。！？!?…])(?![。！？!?…])/)
-        const kept = sentences.filter((sentence) => !sentenceRules.some((re) => re.test(sentence)))
-        if (kept.length !== sentences.length) {
-          adLinesRemoved++
-          text = kept.join('').trim()
+        bump(ruleHits, lineHit.rule.id)
+        if (recordLines) {
+          lines.push({
+            original: line,
+            cleaned: '',
+            segments: [
+              { text: line, removed: true, kind: 'line', ruleName: lineHit.rule.name }
+            ],
+            removed: 'line'
+          })
         }
-      }
-      if (!text) continue
-
-      const normalized = normalizeForHash(text)
-      if (normalized && normalized === previous) {
-        duplicateParagraphsMerged++
         continue
       }
-      previous = normalized
-      paragraphs.push(text)
     }
 
+    let text = line
+    let sentenceRemoved = false
+    let segments: CleanLineSegment[] | null = null
+
+    if (adCleaning && line.length <= 30 && compiled.sentence.length > 0) {
+      const sentences = line.split(SENTENCE_SPLIT).filter(Boolean)
+      const kept: string[] = []
+      const detailSegments: CleanLineSegment[] | null = recordLines ? [] : null
+
+      for (const sentence of sentences) {
+        const sentenceHit = compiled.sentence.find(({ re }) => re.test(sentence))
+        if (sentenceHit) {
+          sentenceRemoved = true
+          bump(ruleHits, sentenceHit.rule.id)
+          detailSegments?.push({
+            text: sentence,
+            removed: true,
+            kind: 'sentence',
+            ruleName: sentenceHit.rule.name
+          })
+        } else {
+          kept.push(sentence)
+          detailSegments?.push({ text: sentence, removed: false })
+        }
+      }
+
+      if (sentenceRemoved) {
+        adLinesRemoved++
+        text = kept.join('').trim()
+        segments = detailSegments
+      }
+    }
+
+    if (!text) {
+      if (recordLines && segments) {
+        lines.push({ original: line, cleaned: '', segments, removed: 'sentence' })
+      }
+      continue
+    }
+
+    const normalized = normalizeForHash(text)
+    if (normalized && normalized === previous) {
+      duplicateParagraphsMerged++
+      if (recordLines) {
+        lines.push({
+          original: line,
+          cleaned: '',
+          segments: segments ?? [{ text: line, removed: true, kind: 'duplicate' }],
+          removed: 'duplicate'
+        })
+      }
+      continue
+    }
+
+    previous = normalized
+    paragraphs.push(text)
+    if (recordLines) {
+      lines.push({
+        original: line,
+        cleaned: text,
+        segments: segments ?? [{ text: line, removed: false }],
+        removed: sentenceRemoved ? 'sentence' : null
+      })
+    }
+  }
+
+  return { paragraphs, lines, adLinesRemoved, duplicateParagraphsMerged, ruleHits }
+}
+
+export function cleanChapters(
+  chapters: SplittedChapter[],
+  rules: AdRule[],
+  options: CleaningRunOptions = {}
+): CleanResult {
+  const adCleaning = options.adCleaning !== false
+  const compiled = adCleaning ? compileRules(rules) : { line: [], sentence: [] }
+  const ruleHits: Record<string, number> = {}
+  const chapterStats: CleanChapterStats[] = []
+  let adLinesRemoved = 0
+  let duplicateParagraphsMerged = 0
+
+  const cleaned = chapters.map((chapter) => {
+    const run = cleanOneChapter(chapter, compiled, adCleaning, false)
+    adLinesRemoved += run.adLinesRemoved
+    duplicateParagraphsMerged += run.duplicateParagraphsMerged
+    for (const [id, count] of Object.entries(run.ruleHits)) {
+      ruleHits[id] = (ruleHits[id] ?? 0) + count
+    }
+    chapterStats.push({
+      adLinesRemoved: run.adLinesRemoved,
+      duplicateParagraphsMerged: run.duplicateParagraphsMerged
+    })
     return {
       title: chapter.title,
       level: chapter.level,
       startLine: chapter.startLine,
-      paragraphs
+      paragraphs: run.paragraphs
     }
   })
 
-  return { chapters: cleaned, adLinesRemoved, duplicateParagraphsMerged }
+  return {
+    chapters: cleaned,
+    adLinesRemoved,
+    duplicateParagraphsMerged,
+    ruleHits,
+    chapterStats
+  }
+}
+
+export function cleanChapterDetailed(
+  chapter: SplittedChapter,
+  rules: AdRule[],
+  options: CleaningRunOptions = {}
+): CleanChapterDetail {
+  const adCleaning = options.adCleaning !== false
+  const compiled = adCleaning ? compileRules(rules) : { line: [], sentence: [] }
+  return cleanOneChapter(chapter, compiled, adCleaning, true)
 }

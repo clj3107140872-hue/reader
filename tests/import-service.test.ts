@@ -119,6 +119,21 @@ describe('ImportService', () => {
     expect(await library.list()).toEqual([])
   })
 
+  it('keeps ad lines when cleaning is disabled', async () => {
+    const library = new LibraryRepository(root)
+    const books = new BookRepository(root)
+    const service = new ImportService(library, books, () => ({ adCleaning: false, rules: [] }))
+
+    const file = join(root, '关闭清洗.txt')
+    await writeFile(file, iconv.encode(makeBookText(1, 1), 'utf8'))
+
+    const outcome = await service.importFile(file)
+    if ('duplicate' in outcome) throw new Error('unexpected duplicate')
+
+    expect(outcome.entry.stats.adLinesRemoved).toBe(0)
+    expect(await books.readChapter(outcome.entry.id, 0)).toContain('www.example-ad.com')
+  })
+
   it('surfaces repair warnings from the parser', async () => {
     const library = new LibraryRepository(root)
     const books = new BookRepository(root)

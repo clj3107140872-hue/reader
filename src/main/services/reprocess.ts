@@ -1,6 +1,7 @@
-import type { AdRule, CleanedChapter, ImportStats } from '../../core/model'
+import type { CleanedChapter, ImportStats } from '../../core/model'
 import { splitChapters } from '../../core/chapters'
 import { BUILTIN_AD_RULES, cleanChapters } from '../../core/cleaning'
+import type { CleaningRunConfig } from '../../core/cleaning'
 import { buildBookDocuments } from '../../core/compose'
 import { chaptersFromLines } from '../../core/reprocess'
 import type { ReprocessResult } from '../../shared/api'
@@ -12,7 +13,10 @@ export class ReprocessService {
   constructor(
     private readonly library: LibraryRepository,
     private readonly books: BookRepository,
-    private readonly userRules: () => AdRule[] = () => []
+    private readonly cleaning: () => CleaningRunConfig = () => ({
+      adCleaning: true,
+      rules: BUILTIN_AD_RULES
+    })
   ) {}
 
   async reclean(id: string): Promise<ReprocessResult> {
@@ -57,7 +61,8 @@ export class ReprocessService {
     chapters: CleanedChapter[],
     reason: 'reclean' | 'resplit'
   ): Promise<ReprocessResult> {
-    const cleaned = cleanChapters(chapters, [...BUILTIN_AD_RULES, ...this.userRules()])
+    const config = this.cleaning()
+    const cleaned = cleanChapters(chapters, config.rules, { adCleaning: config.adCleaning })
     if (cleaned.chapters.every((chapter) => chapter.paragraphs.length === 0)) {
       throw new Error('重新清洗后没有可阅读的正文，已取消')
     }

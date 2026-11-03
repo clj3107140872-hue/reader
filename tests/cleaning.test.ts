@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BUILTIN_AD_RULES, cleanChapters } from '../src/core/cleaning'
+import { BUILTIN_AD_RULES, cleanChapterDetailed, cleanChapters } from '../src/core/cleaning'
 import type { SplittedChapter } from '../src/core/chapters'
 
 function chapter(paragraphs: string[]): SplittedChapter {
@@ -75,5 +75,69 @@ describe('cleanChapters', () => {
     )
     expect(result.chapters[0].paragraphs).toEqual(['正文结束。'])
     expect(result.adLinesRemoved).toBe(1)
+  })
+
+  it('keeps ad lines when ad cleaning is disabled but still merges duplicates', () => {
+    const result = cleanChapters(
+      [chapter(['正文。', '正文。', 'www.example-novel.com'])],
+      BUILTIN_AD_RULES,
+      { adCleaning: false }
+    )
+    expect(result.chapters[0].paragraphs).toEqual(['正文。', 'www.example-novel.com'])
+    expect(result.adLinesRemoved).toBe(0)
+    expect(result.duplicateParagraphsMerged).toBe(1)
+  })
+
+  it('counts hits per rule and per chapter', () => {
+    const rules = [
+      { id: 'ad-line', name: '广告行', type: 'line' as const, pattern: '广告', enabled: true }
+    ]
+    const result = cleanChapters(
+      [chapter(['广告一', '正文。', '广告二']), chapter(['正文。'])],
+      rules
+    )
+    expect(result.ruleHits).toEqual({ 'ad-line': 2 })
+    expect(result.chapterStats).toEqual([
+      { adLinesRemoved: 2, duplicateParagraphsMerged: 0 },
+      { adLinesRemoved: 0, duplicateParagraphsMerged: 0 }
+    ])
+  })
+
+  it('reports a line-level removal in the chapter diff', () => {
+    const detail = cleanChapterDetailed(
+      chapter(['正文。', 'www.example-novel.com']),
+      BUILTIN_AD_RULES
+    )
+    expect(detail.lines).toHaveLength(2)
+    expect(detail.lines[1]).toMatchObject({
+      original: 'www.example-novel.com',
+      cleaned: '',
+      removed: 'line'
+    })
+    expect(detail.lines[1].segments).toEqual([
+      expect.objectContaining({ text: 'www.example-novel.com', removed: true, kind: 'line' })
+    ])
+  })
+
+  it('marks only the removed sentence in the chapter diff', () => {
+    const detail = cleanChapterDetailed(chapter(['请记住本站。正文很短。']), BUILTIN_AD_RULES)
+    expect(detail.paragraphs).toEqual(['正文很短。'])
+    expect(detail.lines[0].removed).toBe('sentence')
+    expect(detail.lines[0].cleaned).toBe('正文很短。')
+    expect(detail.lines[0].segments).toEqual([
+      expect.objectContaining({ text: '请记住本站。', removed: true, kind: 'sentence' }),
+      expect.objectContaining({ text: '正文很短。', removed: false })
+    ])
+    expect(detail.ruleHits.sentence).toBe(1)
+  })
+
+  it('marks a duplicate paragraph in the chapter diff', () => {
+    const detail = cleanChapterDetailed(chapter(['重复段。', '重复段。']), BUILTIN_AD_RULES)
+    expect(detail.lines[1]).toMatchObject({
+      original: '重复段。',
+      cleaned: '',
+      removed: 'duplicate'
+    })
+    expect(detail.lines[1].segments[0]).toMatchObject({ removed: true, kind: 'duplicate' })
   })
 })

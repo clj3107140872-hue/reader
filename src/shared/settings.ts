@@ -11,7 +11,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     pagePadding: 32,
     maxContentWidth: 860
   },
-  cleaning: { enabled: true, enableUserRules: true },
+  cleaning: { enabled: true, disabledBuiltinIds: [] },
   window: { width: 1200, height: 800, maximized: false }
 }
 
@@ -68,10 +68,15 @@ export function normalizeSettings(input: unknown): AppSettings {
     },
     cleaning: {
       enabled: typeof cleaning.enabled === 'boolean' ? cleaning.enabled : DEFAULT_SETTINGS.cleaning.enabled,
-      enableUserRules:
-        typeof cleaning.enableUserRules === 'boolean'
-          ? cleaning.enableUserRules
-          : DEFAULT_SETTINGS.cleaning.enableUserRules
+      disabledBuiltinIds: Array.isArray(cleaning.disabledBuiltinIds)
+        ? [
+            ...new Set(
+              cleaning.disabledBuiltinIds.filter(
+                (id): id is string => typeof id === 'string' && id.length > 0
+              )
+            )
+          ]
+        : DEFAULT_SETTINGS.cleaning.disabledBuiltinIds
     },
     window: {
       width: clamp(windowState.width, 800, 3840, DEFAULT_SETTINGS.window.width),

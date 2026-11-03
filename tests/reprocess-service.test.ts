@@ -112,9 +112,10 @@ describe('ReprocessService', () => {
 
   it('aborts when a cleaning rule removes all paragraphs', async () => {
     await seed(AD_SOURCE, AD_CHAPTERS)
-    const strict = new ReprocessService(library, books, () => [
-      { id: 'all', name: '全部删除', type: 'line', pattern: '.*', enabled: true }
-    ])
+    const strict = new ReprocessService(library, books, () => ({
+      adCleaning: true,
+      rules: [{ id: 'all', name: '全部删除', type: 'line', pattern: '.*', enabled: true }]
+    }))
 
     await expect(strict.reclean('book-1')).rejects.toThrow('没有可阅读的正文')
     expect(await books.readChapter('book-1', 0)).toContain('请记住本站')
@@ -153,6 +154,16 @@ describe('ReprocessService', () => {
 
     expect(await books.readChapter('book-1', 0)).toBe('开头。\n\n第二段。')
     expect(await books.readSource('book-1')).toBe(sourceText)
+  })
+
+  it('restores ad lines when cleaning is disabled', async () => {
+    await seed(AD_SOURCE, AD_CHAPTERS)
+    const off = new ReprocessService(library, books, () => ({ adCleaning: false, rules: [] }))
+
+    const result = await off.reclean('book-1')
+
+    expect(result.stats.adLinesRemoved).toBe(0)
+    expect(await books.readChapter('book-1', 0)).toContain('请记住本站')
   })
 
   it('keeps the book unchanged when no chapter titles are detected', async () => {

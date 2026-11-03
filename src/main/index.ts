@@ -2,9 +2,10 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron'
 import type { MessageBoxOptions, OpenDialogOptions, WebContents } from 'electron'
 import { join } from 'node:path'
 import type { AppSettings, BookProgress } from '../core/model'
-import type { NewBookmark, StartupNotice } from '../shared/api'
+import type { CleaningConfig, NewBookmark, StartupNotice } from '../shared/api'
 import type { SettingsPatch } from '../shared/settings'
 import { BackupService } from './services/backup'
+import { CleaningService } from './services/cleaning'
 import { ImportService } from './services/import'
 import { formatFileSize, ImportQueue } from './services/importQueue'
 import { LibraryService } from './services/library'
@@ -16,6 +17,7 @@ import { ReprocessService } from './services/reprocess'
 import { SearchService } from './services/search'
 import { BookRepository } from './storage/book'
 import { LibraryRepository } from './storage/library'
+import { RuleRepository } from './storage/rules'
 import { SettingsRepository } from './storage/settings'
 import { clampWindowState } from './windowBounds'
 
@@ -62,13 +64,15 @@ process.on('unhandledRejection', (reason) => {
 
 const library = new LibraryRepository(dataDir)
 const books = new BookRepository(dataDir)
-const importer = new ImportService(library, books)
 const settingsRepo = new SettingsRepository(dataDir)
+const rulesRepo = new RuleRepository(dataDir)
+const cleaning = new CleaningService(settingsRepo, rulesRepo, library, books)
+const importer = new ImportService(library, books, () => cleaning.currentRunConfig())
 const reader = new ReaderService(library, books)
 const search = new SearchService(books)
 const merger = new MergeService(library, books)
 const libraryService = new LibraryService(library, books)
-const reprocess = new ReprocessService(library, books)
+const reprocess = new ReprocessService(library, books, () => cleaning.currentRunConfig())
 const backup = new BackupService(library, books)
 let startupNotice: StartupNotice = { libraryRestored: false }
 const importQueue = new ImportQueue(importer, {
@@ -211,6 +215,7 @@ if (hasSingleInstanceLock) {
       if (selection.canceled || selection.filePaths.length === 0) {
         return {
           imported: 0,
+          importedBooks: [],
           duplicates: [],
           suspects: [],
           errors: [],
@@ -255,6 +260,18 @@ if (hasSingleInstanceLock) {
     )
     ipcMain.handle('book:reclean', (_event, id: string) => reprocess.reclean(id))
     ipcMain.handle('book:resplit', (_event, id: string) => reprocess.resplit(id))
+    ipcMain.handle('cleaning:get-config', () => cleaning.getConfig())
+    ipcMain.handle('cleaning:save-config', (_event, config: CleaningConfig) =>
+      cleaning.saveConfig(config)
+    )
+    ipcMain.handle('cleaning:preview', (_event, bookId: string, config?: CleaningConfig) =>
+      cleaning.preview(bookId, config)
+    )
+    ipcMain.handle(
+      'cleaning:chapter-diff',
+      (_event, bookId: string, chapterIndex: number, config?: CleaningConfig) =>
+        cleaning.chapterDiff(bookId, chapterIndex, config)
+    )
     ipcMain.handle('book:search', (event, id: string, query: string, token: string) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       return search.search(id, query, token, (payload) => {

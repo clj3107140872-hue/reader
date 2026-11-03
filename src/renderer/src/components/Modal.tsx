@@ -5,13 +5,14 @@ interface ModalProps {
   title: string
   children: ReactNode
   footer?: ReactNode
+  wide?: boolean
   onClose: () => void
 }
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
-export default function Modal({ title, children, footer, onClose }: ModalProps) {
+export default function Modal({ title, children, footer, wide, onClose }: ModalProps) {
   const modalRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
@@ -65,7 +66,7 @@ export default function Modal({ title, children, footer, onClose }: ModalProps) 
     >
       <div
         ref={modalRef}
-        className="modal"
+        className={wide ? 'modal wide' : 'modal'}
         role="dialog"
         aria-modal="true"
         aria-label={title}

@@ -91,6 +91,6 @@ export interface AppSettings {
   version: 1
   theme: ThemeName
   typography: TypographySettings
-  cleaning: { enabled: boolean; enableUserRules: boolean }
+  cleaning: { enabled: boolean; disabledBuiltinIds: string[] }
   window: { width: number; height: number; x?: number; y?: number; maximized: boolean }
 }
