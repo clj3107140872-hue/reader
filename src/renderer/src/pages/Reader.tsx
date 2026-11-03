@@ -25,6 +25,7 @@ import {
   codeLayout
 } from '../reader/codeLayout'
 import { wheelLineStep } from '../reader/codeWheel'
+import { isNewResizePoint } from '../reader/resizeDrag'
 import {
   charsBefore,
   nearestIndexByTop,
@@ -98,8 +99,48 @@ function readCommentLines(): number {
   }
 }
 
-/** Invisible edge strips that resize frameless disguise windows over IPC. */
+interface ResizeDrag {
+  pointerId: number
+  /** Last position already forwarded to the main process. */
+  lastX: number
+  lastY: number
+  /** Latest position waiting for the next animation frame. */
+  nextX: number
+  nextY: number
+  frame: number | null
+}
+
+/**
+ * Invisible edge strips that resize frameless disguise windows over IPC.
+ * Moves are deduplicated and coalesced into one IPC call per frame: a window
+ * resizing under the pointer can re-send a move at the same screen point, and
+ * forwarding it would make every resize schedule the next one until the app
+ * locks up.
+ */
 function WindowResizeHandles() {
+  const dragRef = useRef<ResizeDrag | null>(null)
+
+  const sendPending = (drag: ResizeDrag): void => {
+    drag.frame = null
+    if (!isNewResizePoint({ x: drag.lastX, y: drag.lastY }, { x: drag.nextX, y: drag.nextY })) {
+      return
+    }
+    drag.lastX = drag.nextX
+    drag.lastY = drag.nextY
+    window.api.windowResizeMove(drag.nextX, drag.nextY)
+  }
+
+  const finish = (): void => {
+    const drag = dragRef.current
+    if (!drag) return
+    if (drag.frame !== null) {
+      window.cancelAnimationFrame(drag.frame)
+      sendPending(drag)
+    }
+    dragRef.current = null
+    window.api.windowResizeEnd()
+  }
+
   return (
     <>
       {RESIZE_EDGES.map((edge) => (
@@ -109,19 +150,42 @@ function WindowResizeHandles() {
           onPointerDown={(event) => {
             event.preventDefault()
             event.currentTarget.setPointerCapture(event.pointerId)
+            dragRef.current = {
+              pointerId: event.pointerId,
+              lastX: event.screenX,
+              lastY: event.screenY,
+              nextX: event.screenX,
+              nextY: event.screenY,
+              frame: null
+            }
             window.api.windowResizeStart(edge, event.screenX, event.screenY)
           }}
           onPointerMove={(event) => {
+            const drag = dragRef.current
+            if (!drag || drag.pointerId !== event.pointerId) return
             if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
-            window.api.windowResizeMove(event.screenX, event.screenY)
+            if (
+              !isNewResizePoint(
+                { x: drag.lastX, y: drag.lastY },
+                { x: event.screenX, y: event.screenY }
+              )
+            ) {
+              return
+            }
+            drag.nextX = event.screenX
+            drag.nextY = event.screenY
+            if (drag.frame === null) {
+              drag.frame = window.requestAnimationFrame(() => sendPending(drag))
+            }
           }}
           onPointerUp={(event) => {
             if (event.currentTarget.hasPointerCapture(event.pointerId)) {
               event.currentTarget.releasePointerCapture(event.pointerId)
             }
-            window.api.windowResizeEnd()
+            finish()
           }}
-          onPointerCancel={() => window.api.windowResizeEnd()}
+          onPointerCancel={finish}
+          onLostPointerCapture={finish}
         />
       ))}
     </>
@@ -1170,7 +1234,6 @@ export default function Reader({
           {drawer === 'settings' && (
             <SettingsPanel
               settings={settings}
-              resolvedTheme={theme}
               onChange={onSettingsChange}
               onClose={() => setDrawer(null)}
             />

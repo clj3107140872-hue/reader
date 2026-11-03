@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { resizeBounds } from '../src/main/services/windowResize'
+import { resizeBounds, sameBounds } from '../src/main/services/windowResize'
 
 const START = { x: 100, y: 100, width: 400, height: 300 }
 const MIN = { width: 120, height: 80 }
+const MAX = { width: 1920, height: 1080 }
 
 describe('resizeBounds', () => {
   it('grows from the east and south edges', () => {
@@ -63,5 +64,41 @@ describe('resizeBounds', () => {
       width: 400,
       height: 80
     })
+  })
+
+  it('caps runaway growth at the virtual desktop size', () => {
+    expect(resizeBounds(START, 'e', 5000, 0, MIN, MAX)).toEqual({
+      x: 100,
+      y: 100,
+      width: 1920,
+      height: 300
+    })
+    expect(resizeBounds(START, 'w', -5000, 0, MIN, MAX)).toEqual({
+      x: -1420,
+      y: 100,
+      width: 1920,
+      height: 300
+    })
+    expect(resizeBounds(START, 'n', 0, -5000, MIN, MAX)).toEqual({
+      x: 100,
+      y: -680,
+      width: 400,
+      height: 1080
+    })
+    expect(resizeBounds(START, 'se', 5000, 5000, MIN, MAX)).toEqual({
+      x: 100,
+      y: 100,
+      width: 1920,
+      height: 1080
+    })
+  })
+})
+
+describe('sameBounds', () => {
+  it('recognises identical bounds so a repeated resize event is ignored', () => {
+    const bounds = resizeBounds(START, 'e', 60, 0, MIN)
+    expect(sameBounds(bounds, { ...bounds })).toBe(true)
+    expect(sameBounds(bounds, { ...bounds, width: bounds.width + 1 })).toBe(false)
+    expect(sameBounds(bounds, { ...bounds, x: bounds.x - 1 })).toBe(false)
   })
 })

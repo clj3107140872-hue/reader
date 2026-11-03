@@ -27,7 +27,7 @@ import { resolveDataDir } from './services/paths'
 import { ReaderService } from './services/reader'
 import { ReprocessService } from './services/reprocess'
 import { SearchService } from './services/search'
-import { resizeBounds } from './services/windowResize'
+import { resizeBounds, sameBounds } from './services/windowResize'
 import type { WindowResizeEdge } from './services/windowResize'
 import { BookRepository } from './storage/book'
 import { LibraryRepository } from './storage/library'
@@ -150,12 +150,30 @@ interface ResizeSession {
   screenY: number
   bounds: Rectangle
   min: { width: number; height: number }
+  max: { width: number; height: number }
+  /** Last bounds handed to setBounds; identical moves are dropped. */
+  last: Rectangle | null
 }
 
 const RESIZE_EDGES: WindowResizeEdge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 
 function isResizeEdge(value: unknown): value is WindowResizeEdge {
   return typeof value === 'string' && RESIZE_EDGES.includes(value as WindowResizeEdge)
+}
+
+function isScreenPoint(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+/** The virtual desktop, used as a hard cap on runaway custom resizing. */
+function desktopSize(): { width: number; height: number } {
+  const displays = screen.getAllDisplays()
+  if (displays.length === 0) return { width: 3840, height: 2160 }
+  const left = Math.min(...displays.map((display) => display.bounds.x))
+  const top = Math.min(...displays.map((display) => display.bounds.y))
+  const right = Math.max(...displays.map((display) => display.bounds.x + display.bounds.width))
+  const bottom = Math.max(...displays.map((display) => display.bounds.y + display.bounds.height))
+  return { width: right - left, height: bottom - top }
 }
 
 let resizeSession: ResizeSession | null = null
@@ -457,6 +475,7 @@ function createWindow(
   mainWindow = win
   windowKind = kind
   win.on('closed', () => {
+    if (resizeSession?.win === win) resizeSession = null
     if (mainWindow !== win) return
     mainWindow = null
     stopBackdropSampling()
@@ -557,14 +576,16 @@ if (hasSingleInstanceLock) {
         const win = BrowserWindow.fromWebContents(event.sender)
         const edge = payload?.edge
         if (!win || win !== mainWindow || !isResizeEdge(edge)) return
-        if (typeof payload.screenX !== 'number' || typeof payload.screenY !== 'number') return
+        if (!isScreenPoint(payload?.screenX) || !isScreenPoint(payload?.screenY)) return
         resizeSession = {
           win,
           edge,
           screenX: payload.screenX,
           screenY: payload.screenY,
           bounds: win.getBounds(),
-          min: minWindowSize(windowKind)
+          min: minWindowSize(windowKind),
+          max: desktopSize(),
+          last: null
         }
       }
     )
@@ -574,21 +595,26 @@ if (hasSingleInstanceLock) {
         const session = resizeSession
         if (
           !session ||
+          session.win.isDestroyed() ||
           BrowserWindow.fromWebContents(event.sender) !== session.win ||
-          typeof payload?.screenX !== 'number' ||
-          typeof payload?.screenY !== 'number'
+          !isScreenPoint(payload?.screenX) ||
+          !isScreenPoint(payload?.screenY)
         ) {
           return
         }
-        session.win.setBounds(
-          resizeBounds(
-            session.bounds,
-            session.edge,
-            payload.screenX - session.screenX,
-            payload.screenY - session.screenY,
-            session.min
-          )
+        const next = resizeBounds(
+          session.bounds,
+          session.edge,
+          payload.screenX - session.screenX,
+          payload.screenY - session.screenY,
+          session.min,
+          session.max
         )
+        // Dropping identical bounds breaks the feedback loop where resizing
+        // the window re-sends a pointer move and schedules another resize.
+        if (session.last && sameBounds(session.last, next)) return
+        session.last = next
+        session.win.setBounds(next)
       }
     )
     ipcMain.on('window:resize-end', (event) => {

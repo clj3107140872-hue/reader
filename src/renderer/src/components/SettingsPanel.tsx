@@ -12,15 +12,15 @@ import type { SettingsPatch } from '../../../shared/settings'
 
 interface SettingsPanelProps {
   settings: AppSettings
-  /** Palette actually rendering after the day/night/system mode is applied. */
-  resolvedTheme: ThemeName
   onChange: (patch: SettingsPatch) => void
   onClose: () => void
 }
 
+// Dark is deliberately absent: night mode always renders the dark palette,
+// and in day mode a dark pick would be silently converted back to light, so
+// the swatch could never become selectable.
 const THEMES: { id: ThemeName; label: string }[] = [
   { id: 'light', label: '浅色' },
-  { id: 'dark', label: '深色' },
   { id: 'green', label: '护眼绿' },
   { id: 'sepia', label: '羊皮纸' }
 ]
@@ -32,12 +32,7 @@ const FONTS = [
   { label: '仿宋', value: "'FangSong', 'STFangsong', serif" }
 ]
 
-export default function SettingsPanel({
-  settings,
-  resolvedTheme,
-  onChange,
-  onClose
-}: SettingsPanelProps) {
+export default function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProps) {
   const typography = settings.typography
   const slacking = settings.slacking
   const fonts = FONTS.some((font) => font.value === typography.fontFamily)
@@ -87,7 +82,7 @@ export default function SettingsPanel({
           {THEMES.map((theme) => (
             <button
               key={theme.id}
-              className={`theme-swatch ${theme.id} ${resolvedTheme === theme.id ? 'active' : ''}`}
+              className={`theme-swatch ${theme.id} ${settings.theme === theme.id ? 'active' : ''}`}
               onClick={() => onChange({ theme: theme.id })}
             >
               {theme.label}
