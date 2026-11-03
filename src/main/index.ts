@@ -138,7 +138,8 @@ function desiredWindowKind(settings: AppSettings, bookId: string | null): Window
 /** Disguise windows may shrink far below the reader's comfortable minimum. */
 function minWindowSize(kind: WindowKind): { width: number; height: number } {
   if (kind === 'transparent') return { width: 120, height: 80 }
-  if (kind === 'code') return { width: 300, height: 240 }
+  // 300px leaves 12 comment lines plus a code line above and below.
+  if (kind === 'code') return { width: 300, height: 300 }
   return { width: 800, height: 600 }
 }
 

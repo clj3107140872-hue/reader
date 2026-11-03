@@ -710,6 +710,17 @@ body[data-slacking='code'] { background: #1e1e1e; }
   z-index: 30;
   -webkit-app-region: drag;
 }
+/* The code window has no title bar; these 14px below the top resize strip
+   move the frameless window without showing any chrome. */
+.code-drag-strip {
+  position: fixed;
+  top: 6px;
+  left: 0;
+  right: 0;
+  height: 14px;
+  z-index: 30;
+  -webkit-app-region: drag;
+}
 /* Frameless disguise windows resize through these invisible edge strips. */
 .window-resize {
   position: fixed;
@@ -762,27 +773,6 @@ body[data-slacking='code'] { background: #1e1e1e; }
   color: #d4d4d4;
   overflow: hidden;
 }
-.vscode-tabbar {
-  flex: 0 0 auto;
-  height: 35px;
-  display: flex;
-  align-items: stretch;
-  padding-right: 16px;
-  background: #252526;
-  user-select: none;
-  -webkit-app-region: drag;
-}
-.vscode-tab {
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
-  background: #1e1e1e;
-  border-top: 1px solid #007acc;
-  color: #d4d4d4;
-  font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
-  font-size: 13px;
-}
-.vscode-tabbar-fill { flex: 1 1 auto; }
 .vscode-editor {
   flex: 1 1 auto;
   min-height: 0;
@@ -791,11 +781,9 @@ body[data-slacking='code'] { background: #1e1e1e; }
   background: #1e1e1e;
   overflow: hidden;
 }
-/* Code occupies the two thirds above and below the comment block. Both panes
-   share the leftover height; the comment band below keeps a fixed share. */
+/* Panes hold whole 20px rows; the band in between is the only scrolling part. */
 .vscode-code {
-  flex: 1 1 0;
-  min-height: 0;
+  flex: 0 0 auto;
   overflow: hidden;
 }
 .vscode-code-row {
@@ -826,12 +814,9 @@ body[data-slacking='code'] { background: #1e1e1e; }
 .tok-comment { color: #6a9955; }
 .tok-num { color: #b5cea8; }
 .vscode-comment-band {
-  flex: 0 0 34%;
-  min-height: 96px;
+  position: relative;
+  flex: 0 0 auto;
   display: flex;
-  /* Keep the column handle clear of the window's east resize strip. */
-  padding-right: 8px;
-  overflow: hidden;
   background: #1e1e1e;
 }
 .vscode-comment-gutter {
@@ -848,41 +833,38 @@ body[data-slacking='code'] { background: #1e1e1e; }
 .vscode-comment-scroll {
   flex: 1 1 auto;
   min-width: 0;
-  max-width: calc(100% - 66px);
   overflow-y: auto;
+  scrollbar-width: none;
 }
-/* Dragging this handle narrows the comment column inside the fake editor. */
-.vscode-column-resizer {
-  flex: 0 0 8px;
-  width: 8px;
-  cursor: col-resize;
+/* No scrollbar: the comment band is a fixed window of whole lines, moved by
+   the wheel or the arrow keys. */
+.vscode-comment-scroll::-webkit-scrollbar { display: none; }
+/* Invisible grip on the band's edges; drag it to add or remove whole lines. */
+.code-band-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 10px;
+  z-index: 4;
+  cursor: ns-resize;
   touch-action: none;
   user-select: none;
-  background: transparent;
 }
-.vscode-column-resizer:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-.vscode-comment-filler {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.vscode-comment-scroll::-webkit-scrollbar { width: 10px; }
-.vscode-comment-scroll::-webkit-scrollbar-track { background: transparent; }
-.vscode-comment-scroll::-webkit-scrollbar-thumb {
-  background: rgba(121, 121, 121, 0.4);
-}
-.vscode-comment-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(121, 121, 121, 0.7);
-}
+.code-band-handle.top { top: -5px; }
+.code-band-handle.bottom { bottom: -5px; }
 .reader[data-slacking='code'] .reader-page {
   max-width: none;
   margin: 0;
-  padding: 0 24px 24px 0;
+  padding: 0 8px 0 0;
   font-family: 'Consolas', 'Courier New', monospace;
   font-size: 14px;
   line-height: 20px;
   color: #6a9955;
+}
+/* Every line must occupy its real 20px box; content-visibility would give
+   off-screen chapters estimated heights and break line snapping. */
+.reader[data-slacking='code'] .reader-chapter {
+  content-visibility: visible;
 }
 .reader[data-slacking='code'] .reader-paragraph {
   margin: 0;
@@ -915,21 +897,6 @@ body[data-slacking='code'] { background: #1e1e1e; }
 .reader[data-slacking='code'] .reader-paragraph.search-flash {
   background: #264f78;
 }
-.vscode-statusbar {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 22px;
-  padding: 0 12px;
-  background: #007acc;
-  color: #ffffff;
-  font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
-  font-size: 12px;
-  user-select: none;
-}
-.vscode-status-spacer { flex: 1 1 auto; }
-
 .reader-notice {
   position: fixed;
   top: 64px;
@@ -1509,4 +1476,151 @@ body[data-slacking='code'] { background: #1e1e1e; }
   border-radius: 7px;
   padding: 8px 10px;
   font-size: 13px;
+}
+
+/* ---------------------------------------------------------------------------
+   Night chrome
+   Day/night paints the app shell (library, dialogs, toasts). The reading page
+   keeps its own palette under .reader[data-theme], and disguise windows keep
+   their own colours, so nothing here reaches into either of them.
+--------------------------------------------------------------------------- */
+:root[data-app-theme='night'] { color-scheme: dark; }
+:root[data-app-theme='night'] body:not([data-slacking]) {
+  background: #1b1b1e;
+  color: #e6e6e9;
+}
+:root[data-app-theme='night'] .hint,
+:root[data-app-theme='night'] .empty,
+:root[data-app-theme='night'] .sub,
+:root[data-app-theme='night'] .modal-note,
+:root[data-app-theme='night'] .modal .drawer-close,
+:root[data-app-theme='night'] .info-list dt,
+:root[data-app-theme='night'] .backup-heading,
+:root[data-app-theme='night'] .backup-list li span,
+:root[data-app-theme='night'] .cleaning-tabs button,
+:root[data-app-theme='night'] .cleaning-switch em,
+:root[data-app-theme='night'] .cleaning-summary span,
+:root[data-app-theme='night'] .cleaning-hits th,
+:root[data-app-theme='night'] .cleaning-check,
+:root[data-app-theme='night'] .rule-form label,
+:root[data-app-theme='night'] .rule-badge,
+:root[data-app-theme='night'] .marker-summary,
+:root[data-app-theme='night'] .marker-no,
+:root[data-app-theme='night'] .chapter-count { color: #a0a0a8; }
+
+:root[data-app-theme='night'] .card,
+:root[data-app-theme='night'] .card-menu,
+:root[data-app-theme='night'] .modal,
+:root[data-app-theme='night'] .hover-card,
+:root[data-app-theme='night'] .marker-list,
+:root[data-app-theme='night'] .rule-list li {
+  background: #232327;
+  color: #e6e6e9;
+}
+:root[data-app-theme='night'] .sort-select,
+:root[data-app-theme='night'] .batch-bar button,
+:root[data-app-theme='night'] .rule-form input,
+:root[data-app-theme='night'] .rule-form select,
+:root[data-app-theme='night'] .marker-toolbar input,
+:root[data-app-theme='night'] .encoding-toolbar select {
+  background: #2b2b30;
+  color: #e6e6e9;
+  border-color: #3a3a41;
+}
+:root[data-app-theme='night'] .card-menu,
+:root[data-app-theme='night'] .modal-header,
+:root[data-app-theme='night'] .modal-footer,
+:root[data-app-theme='night'] .backup-list li,
+:root[data-app-theme='night'] .cleaning-tabs,
+:root[data-app-theme='night'] .cleaning-switch,
+:root[data-app-theme='night'] .rule-list li,
+:root[data-app-theme='night'] .rule-form,
+:root[data-app-theme='night'] .cleaning-chapters,
+:root[data-app-theme='night'] .cleaning-diff,
+:root[data-app-theme='night'] .marker-list,
+:root[data-app-theme='night'] .encoding-preview,
+:root[data-app-theme='night'] .modal-button.ghost,
+:root[data-app-theme='night'] .toolbar button.ghost { border-color: #3a3a41; }
+
+:root[data-app-theme='night'] .toolbar button.ghost,
+:root[data-app-theme='night'] .modal-button.ghost,
+:root[data-app-theme='night'] .link-button,
+:root[data-app-theme='night'] .cleaning-tabs button.active,
+:root[data-app-theme='night'] .cleaning-summary strong,
+:root[data-app-theme='night'] .drop-overlay { color: #8fbf9a; }
+:root[data-app-theme='night'] .cleaning-tabs button.active {
+  border-bottom-color: #8fbf9a;
+}
+:root[data-app-theme='night'] .drop-overlay {
+  border-color: #8fbf9a;
+  background: rgba(27, 27, 30, 0.9);
+}
+
+:root[data-app-theme='night'] .card-more {
+  background: rgba(35, 35, 39, 0.9);
+  color: #a0a0a8;
+}
+:root[data-app-theme='night'] .card-more:hover,
+:root[data-app-theme='night'] .card-menu button:hover,
+:root[data-app-theme='night'] .batch-bar button:hover:not(:disabled),
+:root[data-app-theme='night'] .cleaning-chapters button:hover,
+:root[data-app-theme='night'] .marker-row:hover { background: #2f2f35; }
+:root[data-app-theme='night'] .card-menu button,
+:root[data-app-theme='night'] .cleaning-chapters button { color: #e6e6e9; }
+:root[data-app-theme='night'] .card-menu button.danger,
+:root[data-app-theme='night'] .link-button.danger,
+:root[data-app-theme='night'] .batch-bar button.danger { color: #e08b78; }
+:root[data-app-theme='night'] .batch-bar button.danger { border-color: #6b3a32; }
+:root[data-app-theme='night'] .sub.warn { color: #e0a36a; }
+:root[data-app-theme='night'] .cleaning-chapters button.active {
+  background: #2f4030;
+  box-shadow: inset 3px 0 0 #6ea87a;
+}
+:root[data-app-theme='night'] .cleaning-chapters li + li,
+:root[data-app-theme='night'] .marker-row,
+:root[data-app-theme='night'] .cleaning-hits th,
+:root[data-app-theme='night'] .cleaning-hits td { border-color: #3a3a41; }
+:root[data-app-theme='night'] .marker-row.on { background: #2f4030; }
+:root[data-app-theme='night'] .cleaning-switch,
+:root[data-app-theme='night'] .cleaning-summary div,
+:root[data-app-theme='night'] .rule-form,
+:root[data-app-theme='night'] .encoding-preview { background: #26262b; }
+:root[data-app-theme='night'] .backup-confirm,
+:root[data-app-theme='night'] .cleaning-stale {
+  background: #3a3222;
+  border-color: #6b5a35;
+  color: #e0c07a;
+}
+:root[data-app-theme='night'] .cleaning-hits tr.off { color: #77777f; }
+:root[data-app-theme='night'] .rule-list code { color: #a89b87; }
+:root[data-app-theme='night'] .diff-line.kept { background: #263826; }
+:root[data-app-theme='night'] .diff-line.removed {
+  background: #3f2622;
+  color: #f0a292;
+}
+:root[data-app-theme='night'] .diff-line.duplicate {
+  background: #3d3320;
+  color: #e0b56a;
+}
+:root[data-app-theme='night'] .diff-line del { color: #e08b78; }
+:root[data-app-theme='night'] .diff-line.duplicate del { color: #d6a25a; }
+:root[data-app-theme='night'] .modal-error {
+  background: #3f2622;
+  border-color: #6b3a32;
+  color: #f0a292;
+}
+:root[data-app-theme='night'] .card-check {
+  background: #232327;
+  border-color: #4a4a52;
+}
+:root[data-app-theme='night'] .card.selected .card-check {
+  background: #4a6741;
+  border-color: #4a6741;
+  color: #fff;
+}
+:root[data-app-theme='night'] .rule-form input:focus,
+:root[data-app-theme='night'] .rule-form select:focus,
+:root[data-app-theme='night'] .marker-toolbar input:focus {
+  border-color: #8fbf9a;
+  outline-color: rgba(143, 191, 154, 0.3);
 }

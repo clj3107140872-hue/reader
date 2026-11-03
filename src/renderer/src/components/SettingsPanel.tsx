@@ -88,18 +88,17 @@ export default function SettingsPanel({
             <button
               key={theme.id}
               className={`theme-swatch ${theme.id} ${resolvedTheme === theme.id ? 'active' : ''}`}
-              onClick={() =>
-                onChange(
-                  theme.id === 'dark'
-                    ? { themeMode: 'night' }
-                    : { themeMode: 'day', theme: theme.id }
-                )
-              }
+              onClick={() => onChange({ theme: theme.id })}
             >
               {theme.label}
             </button>
           ))}
         </div>
+        {settings.themeMode === 'night' && (
+          <p className="setting-hint">
+            夜间模式下阅读页固定为深色；所选背景会记住，切回日间后生效。
+          </p>
+        )}
         {settings.themeMode === 'system' && (
           <p className="setting-hint">
             跟随系统：系统为浅色时使用所选日间配色，系统切换到深色时自动使用深色。

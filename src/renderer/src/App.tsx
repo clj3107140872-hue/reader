@@ -52,6 +52,9 @@ export default function App() {
   const [settingsError, setSettingsError] = useState('')
   const systemPrefersDark = useSystemPrefersDark()
   const theme = resolveTheme(settings, systemPrefersDark)
+  // Day/night paints the app chrome (library, dialogs, toasts). The reading
+  // page keeps its own background palette; the two never share a variable.
+  const appTheme = theme === 'dark' ? 'night' : 'day'
   const viewBookId = view.name === 'reader' ? view.bookId : null
   const activeStyle: DisguiseStyle =
     view.name === 'reader' ? settings.slacking.disguise : 'none'
@@ -73,6 +76,10 @@ export default function App() {
       console.error('同步阅读状态失败', reason)
     })
   }, [viewBookId])
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.appTheme = appTheme
+  }, [appTheme])
 
   // The window itself is transparent in this mode, so the page background must
   // be too, or the "transparent" window would still show a beige rectangle.

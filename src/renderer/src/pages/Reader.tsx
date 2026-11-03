@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, PointerEvent as ReactPointerEvent, Ref } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import type {
   AppSettings,
   BookMeta,
@@ -17,6 +17,13 @@ import ProgressBar from '../components/ProgressBar'
 import SearchPanel from '../components/SearchPanel'
 import SettingsPanel from '../components/SettingsPanel'
 import TocDrawer from '../components/TocDrawer'
+import {
+  CODE_COMMENT_DEFAULT,
+  CODE_COMMENT_MAX,
+  CODE_COMMENT_MIN,
+  CODE_ROW_HEIGHT,
+  codeLayout
+} from '../reader/codeLayout'
 import {
   charsBefore,
   nearestIndexByTop,
@@ -77,21 +84,18 @@ const DISGUISE_TITLES: Record<Exclude<DisguiseStyle, 'none'>, string> = {
 const NOTEPAD_MENUS = ['文件', '编辑', '格式', '查看', '帮助'] as const
 
 const RESIZE_EDGES: WindowResizeEdge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
-const CODE_COLUMN_KEY = 'reader.codeColumnWidth'
-/** Narrow enough to tuck the novel into a sliver next to the code. */
-const CODE_COLUMN_MIN = 64
-/** 58px gutter, 8px drag handle and the 8px gap before the window edge. */
-const CODE_COLUMN_CHROME = 74
-/** Matches .vscode-code-row line-height. */
-const CODE_ROW_HEIGHT = 20
+const CODE_LINES_KEY = 'reader.codeCommentLines'
+/** Wheel travel, in pixels, that advances the comment text by one line. */
+const WHEEL_LINE_STEP = 50
 
-function readCodeColumnWidth(): number | null {
+function readCommentLines(): number {
   try {
-    const raw = window.localStorage.getItem(CODE_COLUMN_KEY)
+    const raw = window.localStorage.getItem(CODE_LINES_KEY)
     const parsed = raw === null ? Number.NaN : Number(raw)
-    return Number.isFinite(parsed) && parsed >= CODE_COLUMN_MIN ? Math.round(parsed) : null
+    if (!Number.isFinite(parsed)) return CODE_COMMENT_DEFAULT
+    return Math.min(CODE_COMMENT_MAX, Math.max(CODE_COMMENT_MIN, Math.round(parsed)))
   } catch {
-    return null
+    return CODE_COMMENT_DEFAULT
   }
 }
 
@@ -251,12 +255,11 @@ const CODE_FILE: string[] = (() => {
 interface CodeRowsProps {
   lines: string[]
   start: number
-  paneRef?: Ref<HTMLDivElement>
 }
 
-function CodeRows({ lines, start, paneRef }: CodeRowsProps) {
+function CodeRows({ lines, start }: CodeRowsProps) {
   return (
-    <div className="vscode-code" aria-hidden="true" ref={paneRef}>
+    <div className="vscode-code" aria-hidden="true">
       {lines.map((line, index) => (
         <div className="vscode-code-row" key={index}>
           <span className="vscode-line-number">{start + index}</span>
@@ -373,19 +376,21 @@ export default function Reader({
   const [warningHidden, setWarningHidden] = useState(false)
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
   const [backdropDark, setBackdropDark] = useState(false)
-  const [codeColumnWidth, setCodeColumnWidth] = useState<number | null>(readCodeColumnWidth)
+  const [commentLines, setCommentLines] = useState(readCommentLines)
+  const [editorHeight, setEditorHeight] = useState(() => window.innerHeight)
   const [disguiseMenuOpen, setDisguiseMenuOpen] = useState(false)
   const [disguiseHint, setDisguiseHint] = useState('')
-  const [codeRows, setCodeRows] = useState(10)
-  const [commentRows, setCommentRows] = useState(10)
   const style = settings.slacking.disguise
   const disguised = style !== 'none'
+  const layout = codeLayout(editorHeight, commentLines)
   const scrollRef = useRef<HTMLElement | null>(null)
-  const bandRef = useRef<HTMLDivElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<HTMLDivElement | null>(null)
-  const codePaneRef = useRef<HTMLDivElement | null>(null)
-  const columnDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
+  const lineDragRef = useRef<{
+    edge: 'top' | 'bottom'
+    startY: number
+    startLines: number
+  } | null>(null)
   const restoredRef = useRef(false)
   const rafRef = useRef(0)
   const pendingRef = useRef<BookProgress | null>(null)
@@ -447,23 +452,16 @@ export default function Reader({
     return () => window.clearTimeout(timer)
   }, [disguised, style])
 
-  // Measure the fixed code panes and the comment band so the fake file shows
-  // exactly as many line numbers as fit; ResizeObserver keeps it in sync.
+  // The editor height decides how many whole code lines surround the comment
+  // band; the band itself stays at the line count the user chose.
   useEffect(() => {
     if (style !== 'code') return
-    const pane = codePaneRef.current
-    const band = bandRef.current
-    if (!pane || !band) return
-    const measure = (): void => {
-      setCodeRows(Math.max(2, Math.floor(pane.getBoundingClientRect().height / CODE_ROW_HEIGHT)))
-      setCommentRows(
-        Math.max(2, Math.floor(band.getBoundingClientRect().height / CODE_ROW_HEIGHT))
-      )
-    }
+    const editor = editorRef.current
+    if (!editor) return
+    const measure = (): void => setEditorHeight(editor.getBoundingClientRect().height)
     measure()
     const observer = new ResizeObserver(measure)
-    observer.observe(pane)
-    observer.observe(band)
+    observer.observe(editor)
     return () => observer.disconnect()
   }, [book, style])
 
@@ -492,44 +490,35 @@ export default function Reader({
     [onSettingsChange]
   )
 
-  // Remembering the comment column width keeps the code disguise stable when
-  // the window is recreated for another style.
+  // The line count is a reader preference, kept beside the other renderer-only
+  // state so switching disguise styles (and windows) preserves it.
   useEffect(() => {
-    if (codeColumnWidth === null) return
     try {
-      window.localStorage.setItem(CODE_COLUMN_KEY, String(codeColumnWidth))
+      window.localStorage.setItem(CODE_LINES_KEY, String(commentLines))
     } catch {
-      // Local storage may be unavailable; the width simply resets next time.
+      // Local storage may be unavailable; the count simply resets next time.
     }
-  }, [codeColumnWidth])
+  }, [commentLines])
 
-  const startColumnResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    const scroll = scrollRef.current
-    if (!scroll) return
+  const startLineResize = (
+    edge: 'top' | 'bottom',
+    event: ReactPointerEvent<HTMLDivElement>
+  ): void => {
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
-    columnDragRef.current = {
-      startX: event.screenX,
-      startWidth: scroll.getBoundingClientRect().width
-    }
+    lineDragRef.current = { edge, startY: event.screenY, startLines: layout.lines }
   }
 
-  const moveColumnResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    const drag = columnDragRef.current
-    const band = bandRef.current
-    if (!drag || !band || !event.currentTarget.hasPointerCapture(event.pointerId)) return
-    const available = Math.max(CODE_COLUMN_MIN, band.clientWidth - CODE_COLUMN_CHROME)
-    const next = Math.round(
-      Math.min(
-        available,
-        Math.max(CODE_COLUMN_MIN, drag.startWidth + event.screenX - drag.startX)
-      )
-    )
-    setCodeColumnWidth(next)
+  const moveLineResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const drag = lineDragRef.current
+    if (!drag || !event.currentTarget.hasPointerCapture(event.pointerId)) return
+    const delta = Math.round((event.screenY - drag.startY) / CODE_ROW_HEIGHT)
+    const next = drag.edge === 'bottom' ? drag.startLines + delta : drag.startLines - delta
+    setCommentLines(Math.min(layout.maxLines, Math.max(CODE_COMMENT_MIN, next)))
   }
 
-  const endColumnResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    columnDragRef.current = null
+  const endLineResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    lineDragRef.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
@@ -633,6 +622,19 @@ export default function Reader({
     })
   }, [book, currentPosition, paragraphs, scheduleSave])
 
+  // A half-scrolled line would give the disguise away, so any scroll (including
+  // drag-selection auto-scroll) is pulled back onto the 20px line grid.
+  const handleCommentScroll = useCallback((): void => {
+    const scroller = scrollRef.current
+    if (scroller) {
+      const snapped = Math.round(scroller.scrollTop / CODE_ROW_HEIGHT) * CODE_ROW_HEIGHT
+      if (Math.abs(scroller.scrollTop - snapped) >= 0.5) {
+        scroller.scrollTop = snapped
+      }
+    }
+    handleScroll()
+  }, [handleScroll])
+
   useEffect(() => {
     if (!book || chapters.length === 0 || restoredRef.current) return
     restoredRef.current = true
@@ -675,6 +677,26 @@ export default function Reader({
     // comment column, so scrolling over the code still moves the novel.
     const target = style === 'code' ? editorRef.current : scroller
     if (!scroller || !target) return
+
+    if (style === 'code') {
+      // Trackpads emit many small deltas; accumulate them until a full line is
+      // due, then jump exactly one line so no half line ever shows.
+      let travel = 0
+      const handleWheel = (event: WheelEvent): void => {
+        if (event.ctrlKey || event.shiftKey) return
+        if (event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return
+        if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
+        event.preventDefault()
+        travel += event.deltaY
+        const lines = Math.trunc(travel / WHEEL_LINE_STEP)
+        if (lines === 0) return
+        travel -= lines * WHEEL_LINE_STEP
+        scroller.scrollTop += lines * CODE_ROW_HEIGHT
+      }
+
+      target.addEventListener('wheel', handleWheel, { passive: false })
+      return () => target.removeEventListener('wheel', handleWheel)
+    }
 
     // Native wheel scrolling animates the full 100px notch, which blurs the
     // text while it moves. Scroll a shorter distance and land on it at once
@@ -795,11 +817,19 @@ export default function Reader({
     [bookId]
   )
 
-  const scrollByScreen = useCallback((direction: number): void => {
-    const scroller = scrollRef.current
-    if (!scroller) return
-    scroller.scrollBy({ top: direction * scroller.clientHeight * 0.9, behavior: 'smooth' })
-  }, [])
+  const scrollByScreen = useCallback(
+    (direction: number): void => {
+      const scroller = scrollRef.current
+      if (!scroller) return
+      if (style === 'code') {
+        // One screen is exactly the comment band, never a partial line.
+        scroller.scrollTop += direction * layout.lines * CODE_ROW_HEIGHT
+        return
+      }
+      scroller.scrollBy({ top: direction * scroller.clientHeight * 0.9, behavior: 'smooth' })
+    },
+    [layout.lines, style]
+  )
 
   const changeFontSize = useCallback(
     (delta: number): void => {
@@ -883,11 +913,13 @@ export default function Reader({
       switch (event.key) {
         case 'ArrowLeft':
           event.preventDefault()
-          jumpToChapter(current.chapterIndex - 1)
+          if (style === 'code') scrollByScreen(-1)
+          else jumpToChapter(current.chapterIndex - 1)
           break
         case 'ArrowRight':
           event.preventDefault()
-          jumpToChapter(current.chapterIndex + 1)
+          if (style === 'code') scrollByScreen(1)
+          else jumpToChapter(current.chapterIndex + 1)
           break
         case ' ':
           event.preventDefault()
@@ -1021,12 +1053,7 @@ export default function Reader({
         />
       )}
 
-      {style === 'code' && (
-        <div className="vscode-tabbar">
-          <div className="vscode-tab">codenovel.js</div>
-          <div className="vscode-tabbar-fill" />
-        </div>
-      )}
+      {style === 'code' && <div className="code-drag-strip" />}
 
       {style === 'transparent' && <div className="transparent-drag-strip" />}
 
@@ -1043,41 +1070,53 @@ export default function Reader({
 
       {style === 'code' ? (
         <div className="vscode-editor" ref={editorRef}>
-          <CodeRows lines={CODE_FILE.slice(0, codeRows)} start={1} paneRef={codePaneRef} />
-          <div className="vscode-comment-band" ref={bandRef}>
+          <CodeRows lines={CODE_FILE.slice(0, layout.topRows)} start={1} />
+          <div
+            className="vscode-comment-band"
+            style={{ height: layout.lines * CODE_ROW_HEIGHT }}
+          >
             <div className="vscode-comment-gutter" aria-hidden="true">
-              {Array.from({ length: commentRows }, (_, index) => codeRows + index + 1).map(
-                (line) => (
-                  <span key={line}>{line}</span>
-                )
-              )}
+              {Array.from(
+                { length: layout.lines },
+                (_, index) => layout.topRows + index + 1
+              ).map((line) => (
+                <span key={line}>{line}</span>
+              ))}
             </div>
             <main
               className="reader-scroll vscode-comment-scroll"
               ref={scrollRef}
-              onScroll={handleScroll}
-              style={
-                codeColumnWidth === null
-                  ? undefined
-                  : { flex: `0 0 ${codeColumnWidth}px`, width: codeColumnWidth }
-              }
+              onScroll={handleCommentScroll}
             >
               <ReaderBody chapters={chapters} />
             </main>
             <div
-              className="vscode-column-resizer"
+              className="code-band-handle top"
               role="separator"
-              aria-orientation="vertical"
-              onPointerDown={startColumnResize}
-              onPointerMove={moveColumnResize}
-              onPointerUp={endColumnResize}
-              onPointerCancel={endColumnResize}
+              aria-orientation="horizontal"
+              aria-label="调整正文行数"
+              onPointerDown={(event) => startLineResize('top', event)}
+              onPointerMove={moveLineResize}
+              onPointerUp={endLineResize}
+              onPointerCancel={endLineResize}
             />
-            <div className="vscode-comment-filler" aria-hidden="true" />
+            <div
+              className="code-band-handle bottom"
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="调整正文行数"
+              onPointerDown={(event) => startLineResize('bottom', event)}
+              onPointerMove={moveLineResize}
+              onPointerUp={endLineResize}
+              onPointerCancel={endLineResize}
+            />
           </div>
           <CodeRows
-            lines={CODE_FILE.slice(codeRows + commentRows, codeRows * 2 + commentRows)}
-            start={codeRows + commentRows + 1}
+            lines={CODE_FILE.slice(
+              layout.topRows + layout.lines,
+              layout.topRows + layout.lines + layout.bottomRows
+            )}
+            start={layout.topRows + layout.lines + 1}
           />
         </div>
       ) : (
@@ -1098,17 +1137,6 @@ export default function Reader({
           <span>100%</span>
           <span>Windows (CRLF)</span>
           <span>UTF-8</span>
-        </footer>
-      )}
-
-      {style === 'code' && (
-        <footer className="vscode-statusbar">
-          <span>main</span>
-          <span>0 ⚠ 0 ✖</span>
-          <span className="vscode-status-spacer" />
-          <span>Ln {current.paragraphIndex + 1}, Col 1</span>
-          <span>UTF-8</span>
-          <span>JavaScript</span>
         </footer>
       )}
 
