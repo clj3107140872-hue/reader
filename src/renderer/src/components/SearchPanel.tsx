@@ -16,6 +16,7 @@ export default function SearchPanel({ bookId, chapters, onJump, onClose }: Searc
   const [progress, setProgress] = useState<SearchProgress | null>(null)
   const [searching, setSearching] = useState(false)
   const [message, setMessage] = useState('')
+  const [warnings, setWarnings] = useState<string[]>([])
   const tokenRef = useRef('')
   const inFlightRef = useRef(false)
 
@@ -41,11 +42,13 @@ export default function SearchPanel({ bookId, chapters, onJump, onClose }: Searc
     setSearching(true)
     setHits([])
     setMessage('')
+    setWarnings([])
     setProgress({ token, scanned: 0, total: chapters.length })
     try {
       const result = await window.api.searchBook(bookId, text, token)
       if (tokenRef.current !== token) return
       setHits(result.hits)
+      setWarnings(result.warnings)
       if (result.cancelled) setMessage('已取消搜索')
       else if (result.hits.length === 0) setMessage('没有找到匹配内容')
       else if (result.truncated) setMessage('结果超过 300 条，已截断')
@@ -108,6 +111,7 @@ export default function SearchPanel({ bookId, chapters, onJump, onClose }: Searc
       )}
 
       {message && <p className="search-message">{message}</p>}
+      {warnings.length > 0 && <p className="search-warning">{warnings.join('；')}</p>}
 
       <ul className="search-results">
         {hits.map((hit, index) => (

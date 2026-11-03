@@ -69,6 +69,7 @@ describe('ReaderService', () => {
     const payload = await service.open(bookId)
     expect(payload.meta.title).toBe('测试书')
     expect(payload.chapters).toEqual(['第一段。\n\n另一段。', '第二段。'])
+    expect(payload.warnings).toEqual([])
     expect(payload.progress).toBeNull()
     expect(payload.bookmarks).toEqual([])
   })
@@ -127,10 +128,22 @@ describe('ReaderService', () => {
     expect(stored.bookmarks[0].paragraphIndex).toBe(1)
   })
 
-  it('rejects a missing chapter file with a readable error', async () => {
-    const payload = await service.open(bookId)
+  it('rebuilds a missing chapter file from the stored source', async () => {
     await rm(join(root, 'books', bookId, 'chapters', '00001.txt'))
+    const payload = await service.open(bookId)
     expect(payload.chapters).toHaveLength(2)
-    await expect(service.open(bookId)).rejects.toThrow('章节文件缺失')
+    expect(payload.chapters[0]).toBe('第一段。\n\n另一段。')
+    expect(payload.chapters[1]).toBe('第二段。')
+    expect(payload.warnings.join('')).toContain('已从原文重建')
+  })
+
+  it('shows a placeholder when the chapter file and source are both missing', async () => {
+    await rm(join(root, 'books', bookId, 'chapters', '00001.txt'))
+    await rm(join(root, 'books', bookId, 'source.txt'))
+    const payload = await service.open(bookId)
+    expect(payload.chapters).toHaveLength(2)
+    expect(payload.chapters[0]).toBe('第一段。\n\n另一段。')
+    expect(payload.chapters[1]).toContain('本章文件缺失')
+    expect(payload.warnings.join('')).toContain('占位')
   })
 })

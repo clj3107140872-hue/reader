@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import type { Bookmark, BookProgress } from '../../core/model'
+import { chapterFromLines } from '../../core/reprocess'
 import type { NewBookmark, OpenBookPayload } from '../../shared/api'
 import type { BookRepository } from '../storage/book'
 import type { LibraryRepository } from '../storage/library'
 import { assertBookId } from '../bookId'
+
+const MISSING_CHAPTER_PLACEHOLDER =
+  '（本章文件缺失，内容无法恢复。可从备份恢复或重新导入原文件。）'
 
 export class ReaderService {
   private readonly locks = new Map<string, Promise<unknown>>()
@@ -27,15 +31,37 @@ export class ReaderService {
     assertBookId(id)
     const meta = await this.books.readMeta(id)
     const chapters: string[] = []
+    const warnings: string[] = []
+    // Loaded only when a chapter file is unusable; null means it is gone too.
+    let sourceText: string | null | undefined
     for (const chapter of meta.chapters) {
       try {
         chapters.push(await this.books.readChapter(id, chapter.index))
+        continue
       } catch {
-        throw new Error(`章节文件缺失：${chapter.title}`)
+        // Rebuild below from the pre-cleaning source that every book keeps.
+      }
+
+      if (sourceText === undefined) {
+        sourceText = await this.books.readSource(id).catch(() => null)
+      }
+      const rebuilt =
+        sourceText === null
+          ? ''
+          : chapterFromLines(sourceText, meta, chapter.index).paragraphs.join('\n\n').trim()
+
+      if (rebuilt === '') {
+        chapters.push(MISSING_CHAPTER_PLACEHOLDER)
+        warnings.push(
+          `第 ${chapter.index + 1} 章《${chapter.title}》文件缺失且无法从原文重建，已显示占位内容`
+        )
+      } else {
+        chapters.push(rebuilt)
+        warnings.push(`第 ${chapter.index + 1} 章《${chapter.title}》文件缺失，已从原文重建`)
       }
     }
     const stored = await this.books.readProgress(id)
-    return { meta, chapters, progress: stored.progress, bookmarks: stored.bookmarks }
+    return { meta, chapters, warnings, progress: stored.progress, bookmarks: stored.bookmarks }
   }
 
   async saveProgress(id: string, progress: BookProgress): Promise<void> {

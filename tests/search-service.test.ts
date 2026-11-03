@@ -58,7 +58,7 @@ beforeEach(async () => {
   service = new SearchService(books)
   await books.writeBook({
     meta: meta(),
-    sourceText: '原文',
+    sourceText: '第一章\n开场白。\n第二章\n第二章正文。\n第三章\n包含 .* 和 [ 符号的段落。',
     chapters: [
       { title: '第一章', level: 'chapter', startLine: 0, paragraphs: ['开场白。', '这里有正文内容。'] },
       { title: '第二章', level: 'chapter', startLine: 2, paragraphs: ['第二章正文。'] },
@@ -87,6 +87,24 @@ describe('SearchService', () => {
     const result = await service.search('b', '.*', 't2', () => undefined)
     expect(result.hits).toHaveLength(1)
     expect(result.hits[0].chapterIndex).toBe(2)
+  })
+
+  it('rebuilds a missing chapter file from the stored source', async () => {
+    await rm(join(root, 'books', 'b', 'chapters', '00001.txt'))
+    const result = await service.search('b', '正文', 't6', () => undefined)
+    expect(result.hits.map((hit) => [hit.chapterIndex, hit.paragraphIndex])).toEqual([
+      [0, 1],
+      [1, 0]
+    ])
+    expect(result.warnings.join('')).toContain('已从原文重建')
+  })
+
+  it('skips a chapter that cannot be rebuilt and reports it', async () => {
+    await rm(join(root, 'books', 'b', 'chapters', '00001.txt'))
+    await rm(join(root, 'books', 'b', 'source.txt'))
+    const result = await service.search('b', '正文', 't7', () => undefined)
+    expect(result.hits.map((hit) => [hit.chapterIndex, hit.paragraphIndex])).toEqual([[0, 1]])
+    expect(result.warnings.join('')).toContain('已跳过')
   })
 
   it('returns early when the token was cancelled', async () => {

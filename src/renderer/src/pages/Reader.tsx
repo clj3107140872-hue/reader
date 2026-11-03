@@ -92,6 +92,7 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
   const [current, setCurrent] = useState<CurrentPosition>({ chapterIndex: 0, paragraphIndex: 0, percent: 0 })
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [notice, setNotice] = useState('')
+  const [warningHidden, setWarningHidden] = useState(false)
   const scrollRef = useRef<HTMLElement | null>(null)
   const restoredRef = useRef(false)
   const rafRef = useRef(0)
@@ -102,6 +103,7 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
     let alive = true
     setBook(null)
     setError('')
+    setWarningHidden(false)
     restoredRef.current = false
     window.api
       .openBook(bookId)
@@ -535,6 +537,15 @@ export default function Reader({ bookId, settings, onSettingsChange, onBack }: R
           排版
         </button>
       </header>
+
+      {book.warnings.length > 0 && !warningHidden && (
+        <div className="reader-warning" role="status">
+          <span>{book.warnings.join('；')}</span>
+          <button className="ghost" onClick={() => setWarningHidden(true)}>
+            知道了
+          </button>
+        </div>
+      )}
 
       <main className="reader-scroll" ref={scrollRef} onScroll={handleScroll}>
         <ReaderBody chapters={chapters} />

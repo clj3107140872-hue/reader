@@ -146,6 +146,8 @@ export interface StartupNotice {
 export interface OpenBookPayload {
   meta: BookMeta
   chapters: string[]
+  /** User-visible notes about chapters that had to be rebuilt or replaced. */
+  warnings: string[]
   progress: BookProgress | null
   bookmarks: Bookmark[]
 }
@@ -173,6 +175,8 @@ export interface SearchProgress {
 export interface SearchResults {
   token: string
   hits: SearchHit[]
+  /** User-visible notes about chapters that were rebuilt or skipped. */
+  warnings: string[]
   truncated: boolean
   cancelled: boolean
 }
