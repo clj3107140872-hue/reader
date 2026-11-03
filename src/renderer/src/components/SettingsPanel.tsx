@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { AppSettings, ThemeName } from '../../../core/model'
 import {
+  BOSS_KEY_ACTIONS,
+  BOSS_KEY_OPTIONS,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
   THEME_MODE_OPTIONS
@@ -36,6 +38,7 @@ export default function SettingsPanel({
   onClose
 }: SettingsPanelProps) {
   const typography = settings.typography
+  const slacking = settings.slacking
   const fonts = FONTS.some((font) => font.value === typography.fontFamily)
     ? FONTS
     : [{ label: '当前字体', value: typography.fontFamily }, ...FONTS]
@@ -60,8 +63,8 @@ export default function SettingsPanel({
   return (
     <aside className="reader-drawer right settings-panel">
       <header className="drawer-header">
-        <h2>排版</h2>
-        <button className="drawer-close" onClick={onClose} aria-label="关闭排版设置">
+        <h2>设置</h2>
+        <button className="drawer-close" onClick={onClose} aria-label="关闭设置">
           ×
         </button>
       </header>
@@ -198,6 +201,87 @@ export default function SettingsPanel({
             不限制
           </label>
         </label>
+      </section>
+
+      <section className="setting-group">
+        <h3>摸鱼模式</h3>
+        <button
+          className={`setting-button ${slacking.disguise ? 'active' : ''}`}
+          onClick={() => onChange({ slacking: { disguise: !slacking.disguise } })}
+        >
+          {slacking.disguise ? '退出伪装（Esc）' : '进入伪装'}
+        </button>
+        <p className="setting-hint">
+          伪装成记事本：窗口标题改为「工作文档.txt - 记事本」，正文改用等宽字体并隐藏阅读器工具栏。
+        </p>
+
+        <label className="setting-row">
+          <span>不透明度</span>
+          <input
+            type="range"
+            min={0.6}
+            max={1}
+            step={0.05}
+            value={slacking.opacity}
+            onChange={(event) =>
+              onChange({ slacking: { opacity: Number(event.target.value) } })
+            }
+          />
+          <output>{Math.round(slacking.opacity * 100)}%</output>
+        </label>
+
+        <label className="setting-check">
+          <input
+            type="checkbox"
+            checked={slacking.alwaysOnTop}
+            onChange={(event) =>
+              onChange({ slacking: { alwaysOnTop: event.target.checked } })
+            }
+          />
+          窗口置顶
+        </label>
+
+        <label className="setting-row">
+          <span>老板键</span>
+          <select
+            value={slacking.bossKey}
+            onChange={(event) => onChange({ slacking: { bossKey: event.target.value } })}
+          >
+            {BOSS_KEY_OPTIONS.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="setting-row">
+          <span>老板键动作</span>
+          <select
+            value={slacking.bossKeyAction}
+            disabled={!slacking.bossKey}
+            onChange={(event) =>
+              onChange({
+                slacking: { bossKeyAction: event.target.value as AppSettings['slacking']['bossKeyAction'] }
+              })
+            }
+          >
+            {BOSS_KEY_ACTIONS.map((action) => (
+              <option key={action.id} value={action.id}>
+                {action.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {slacking.bossKey ? (
+          <p className="setting-hint">
+            按 {slacking.bossKey}
+            {slacking.bossKeyAction === 'hide' ? '隐藏窗口' : '最小化窗口'}，再按一次恢复。
+          </p>
+        ) : (
+          <p className="setting-hint">老板键已关闭。</p>
+        )}
       </section>
     </aside>
   )

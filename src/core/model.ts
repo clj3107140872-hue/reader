@@ -80,6 +80,18 @@ export interface AdRule {
 
 export type ThemeName = 'light' | 'dark' | 'green' | 'sepia'
 export type ThemeMode = 'day' | 'night' | 'system'
+export type BossKeyAction = 'hide' | 'minimize'
+
+export interface SlackingSettings {
+  /** Renders the reader as a plain-text editor and renames the window. */
+  disguise: boolean
+  /** Window opacity, 0.6..1. */
+  opacity: number
+  alwaysOnTop: boolean
+  /** Electron accelerator, or an empty string to disable the boss key. */
+  bossKey: string
+  bossKeyAction: BossKeyAction
+}
 
 export interface TypographySettings {
   fontFamily: string
@@ -95,6 +107,7 @@ export interface AppSettings {
   /** Day palette; night mode always renders the dark palette. */
   theme: ThemeName
   themeMode: ThemeMode
+  slacking: SlackingSettings
   typography: TypographySettings
   cleaning: { enabled: boolean; disabledBuiltinIds: string[] }
   window: { width: number; height: number; x?: number; y?: number; maximized: boolean }

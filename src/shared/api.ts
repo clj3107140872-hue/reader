@@ -181,6 +181,14 @@ export interface SearchResults {
   cancelled: boolean
 }
 
+export interface DebugWindowState {
+  visible: boolean
+  minimised: boolean
+  opacity: number
+  alwaysOnTop: boolean
+  bossKey: string | null
+}
+
 export interface ReaderApi {
   ping(): Promise<string>
   libraryList(): Promise<LibraryEntry[]>
@@ -191,6 +199,9 @@ export interface ReaderApi {
   pathForFile(file: unknown): string
   /** Development builds only; rejects in packaged builds. */
   debugImport(paths: string[]): Promise<ImportSummary>
+  /** Development builds only; runs the boss-key action without a registered shortcut. */
+  debugBossToggle(): Promise<void>
+  debugWindowState(): Promise<DebugWindowState | null>
   onImportProgress(cb: (payload: { fileName: string; stage: string }) => void): () => void
   openBook(id: string): Promise<OpenBookPayload>
   saveProgress(id: string, progress: BookProgress): Promise<void>

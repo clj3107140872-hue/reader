@@ -392,6 +392,31 @@ body {
 .theme-swatch.green { background: #e8f0e3; color: #26332a; }
 .theme-swatch.sepia { background: #f4ecd8; color: #4a3b2a; }
 .theme-swatch.active { outline: 2px solid var(--reader-accent); outline-offset: 1px; }
+.setting-button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--reader-border);
+  border-radius: 6px;
+  background: var(--reader-panel);
+  color: var(--reader-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.setting-button.active {
+  border-color: var(--reader-accent);
+  background: var(--reader-hover);
+  color: var(--reader-accent);
+}
+.setting-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--reader-muted);
+  cursor: pointer;
+}
+.setting-row select:disabled { opacity: 0.5; }
 
 .toc-filter { padding: 10px 16px; border-bottom: 1px solid var(--reader-border); }
 .toc-filter input {
@@ -508,6 +533,96 @@ body {
   cursor: pointer;
 }
 .bookmark-delete:hover { color: #a45b2a; }
+/* 摸鱼模式：a deliberately plain Notepad look that ignores the reader palette. */
+.reader[data-slacking='on'] {
+  --reader-bg: #ffffff;
+  --reader-text: #000000;
+  --reader-muted: #303030;
+  --reader-border: #d4d4d4;
+  --reader-accent: #000000;
+  --reader-hover: #e5f3ff;
+  --reader-panel: #f0f0f0;
+  --reader-panel-strong: #ffffff;
+}
+.notepad-menubar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  background: #ffffff;
+  border-bottom: 1px solid #d4d4d4;
+  font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  font-size: 12px;
+  color: #000000;
+  user-select: none;
+}
+.notepad-menu-wrap { position: relative; display: flex; }
+.notepad-menu {
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  padding: 5px 10px;
+  cursor: default;
+}
+.notepad-menu:hover,
+.notepad-menu.open { background: #e5f3ff; }
+.notepad-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  min-width: 210px;
+  padding: 3px;
+  background: #f7f7f7;
+  border: 1px solid #c8c8c8;
+  box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.18);
+}
+.notepad-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: #000000;
+  text-align: left;
+  cursor: default;
+}
+.notepad-item:not(:disabled):hover { background: #cde8ff; }
+.notepad-item:disabled { color: #9a9a9a; }
+.notepad-item span { color: #9a9a9a; }
+.notepad-separator { height: 1px; margin: 4px 6px; background: #d4d4d4; }
+.notepad-statusbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+  padding: 3px 12px;
+  background: #f0f0f0;
+  border-top: 1px solid #d4d4d4;
+  font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  font-size: 12px;
+  color: #000000;
+}
+.notepad-status-start { margin-right: auto; }
+.reader[data-slacking='on'] .reader-page {
+  max-width: none;
+  padding: 4px 10px 60px;
+  font-family: 'Consolas', 'Courier New', 'NSimSun', monospace;
+  font-size: clamp(15px, var(--reader-font-size, 16px), 20px);
+  line-height: 1.4;
+}
+.reader[data-slacking='on'] .reader-paragraph { margin: 0; text-indent: 0; }
+.reader[data-slacking='on'] .chapter-title {
+  font-size: inherit;
+  font-weight: normal;
+  margin: 0;
+}
+
 .reader-notice {
   position: fixed;
   top: 64px;

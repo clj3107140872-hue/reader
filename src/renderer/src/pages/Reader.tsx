@@ -61,6 +61,63 @@ function positionInSection(
   return { chapterIndex, paragraphIndex: Number(paragraph.dataset.paragraphIndex) }
 }
 
+const NOTEPAD_DISGUISE_TITLE = '工作文档.txt - 记事本'
+
+const NOTEPAD_MENUS = ['文件', '编辑', '格式', '查看', '帮助'] as const
+
+interface NotepadMenubarProps {
+  fileMenuOpen: boolean
+  onToggleFileMenu: () => void
+  onCloseFileMenu: () => void
+  onExitDisguise: () => void
+}
+
+/** Fake Notepad menu bar; the items are decorative except 文件 → 退出. */
+function NotepadMenubar({
+  fileMenuOpen,
+  onToggleFileMenu,
+  onCloseFileMenu,
+  onExitDisguise
+}: NotepadMenubarProps) {
+  return (
+    <nav className="notepad-menubar" onMouseLeave={onCloseFileMenu}>
+      <div className="notepad-menu-wrap">
+        <button
+          className={`notepad-menu ${fileMenuOpen ? 'open' : ''}`}
+          onClick={onToggleFileMenu}
+        >
+          文件
+        </button>
+        {fileMenuOpen && (
+          <div className="notepad-dropdown" role="menu">
+            <button className="notepad-item" disabled>
+              新建<span>Ctrl+N</span>
+            </button>
+            <button className="notepad-item" disabled>
+              打开…<span>Ctrl+O</span>
+            </button>
+            <button className="notepad-item" disabled>
+              保存<span>Ctrl+S</span>
+            </button>
+            <button className="notepad-item" disabled>
+              另存为…<span>Ctrl+Shift+S</span>
+            </button>
+            <div className="notepad-separator" />
+            <button className="notepad-item" onClick={onExitDisguise}>
+              退出<span>Esc</span>
+            </button>
+          </div>
+        )}
+      </div>
+      {NOTEPAD_MENUS.slice(1).map((label) => (
+        <button key={label} className="notepad-menu" onClick={onCloseFileMenu}>
+          {label}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
 const ReaderBody = memo(function ReaderBody({ chapters }: { chapters: ChapterView[] }) {
   return (
     <article className="reader-page">
@@ -101,6 +158,8 @@ export default function Reader({
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [notice, setNotice] = useState('')
   const [warningHidden, setWarningHidden] = useState(false)
+  const [fileMenuOpen, setFileMenuOpen] = useState(false)
+  const disguise = settings.slacking.disguise
   const scrollRef = useRef<HTMLElement | null>(null)
   const restoredRef = useRef(false)
   const rafRef = useRef(0)
@@ -134,6 +193,29 @@ export default function Reader({
     const timer = window.setTimeout(() => setNotice(''), 1600)
     return () => window.clearTimeout(timer)
   }, [notice])
+
+  // A drawer on top of the fake Notepad would break the illusion.
+  useEffect(() => {
+    if (disguise) setDrawer(null)
+  }, [disguise])
+
+  // Disguised reads rename the OS window too, otherwise the taskbar gives it away.
+  useEffect(() => {
+    if (!disguise) return
+    const previous = document.title
+    document.title = NOTEPAD_DISGUISE_TITLE
+    return () => {
+      document.title = previous
+    }
+  }, [disguise])
+
+  const setDisguise = useCallback(
+    (next: boolean): void => {
+      setFileMenuOpen(false)
+      onSettingsChange({ slacking: { disguise: next } })
+    },
+    [onSettingsChange]
+  )
 
   const chapters = useMemo<ChapterView[]>(() => {
     if (!book) return []
@@ -451,6 +533,7 @@ export default function Reader({
       if (event.key === 'Escape') {
         event.preventDefault()
         if (drawer) setDrawer(null)
+        else if (disguise) setDisguise(false)
         else onBack()
         return
       }
@@ -488,10 +571,12 @@ export default function Reader({
   }, [
     changeFontSize,
     current.chapterIndex,
+    disguise,
     drawer,
     jumpToChapter,
     onBack,
     scrollByScreen,
+    setDisguise,
     toggleBookmark
   ])
 
@@ -523,30 +608,51 @@ export default function Reader({
   const remainingMinutes = Math.max(0, Math.ceil((total - read) / 400))
 
   return (
-    <div className="reader" data-theme={theme} style={readerStyle}>
-      <header className="reader-toolbar">
-        <button className="ghost" onClick={onBack}>
-          ← 书架
-        </button>
-        <span className="reader-title" title={book.meta.title}>
-          {book.meta.title}
-        </span>
-        <span className="toolbar-spacer" />
-        <button className="ghost" onClick={() => setDrawer('toc')}>
-          目录
-        </button>
-        <button className="ghost" onClick={() => setDrawer('search')}>
-          搜索
-        </button>
-        <button className="ghost" onClick={() => setDrawer('bookmarks')}>
-          书签{bookmarks.length > 0 ? ` ${bookmarks.length}` : ''}
-        </button>
-        <button className="ghost" onClick={() => setDrawer('settings')}>
-          排版
-        </button>
-      </header>
+    <div
+      className="reader"
+      data-theme={theme}
+      data-slacking={disguise ? 'on' : undefined}
+      style={readerStyle}
+    >
+      {disguise ? (
+        <NotepadMenubar
+          fileMenuOpen={fileMenuOpen}
+          onToggleFileMenu={() => setFileMenuOpen((open) => !open)}
+          onCloseFileMenu={() => setFileMenuOpen(false)}
+          onExitDisguise={() => setDisguise(false)}
+        />
+      ) : (
+        <header className="reader-toolbar">
+          <button className="ghost" onClick={onBack}>
+            ← 书架
+          </button>
+          <span className="reader-title" title={book.meta.title}>
+            {book.meta.title}
+          </span>
+          <span className="toolbar-spacer" />
+          <button className="ghost" onClick={() => setDrawer('toc')}>
+            目录
+          </button>
+          <button className="ghost" onClick={() => setDrawer('search')}>
+            搜索
+          </button>
+          <button className="ghost" onClick={() => setDrawer('bookmarks')}>
+            书签{bookmarks.length > 0 ? ` ${bookmarks.length}` : ''}
+          </button>
+          <button className="ghost" onClick={() => setDrawer('settings')}>
+            设置
+          </button>
+          <button
+            className="ghost slacking-entry"
+            onClick={() => setDisguise(true)}
+            title="伪装成记事本，按 Esc 退出"
+          >
+            摸鱼
+          </button>
+        </header>
+      )}
 
-      {book.warnings.length > 0 && !warningHidden && (
+      {book.warnings.length > 0 && !warningHidden && !disguise && (
         <div className="reader-warning" role="status">
           <span>{book.warnings.join('；')}</span>
           <button className="ghost" onClick={() => setWarningHidden(true)}>
@@ -559,13 +665,24 @@ export default function Reader({
         <ReaderBody chapters={chapters} />
       </main>
 
-      <ProgressBar
-        percent={current.percent}
-        chapterIndex={current.chapterIndex}
-        chapterCount={book.meta.chapters.length}
-        remainingMinutes={remainingMinutes}
-        onSeek={seek}
-      />
+      {disguise ? (
+        <footer className="notepad-statusbar">
+          <span className="notepad-status-start">
+            第 {current.paragraphIndex + 1} 行，第 1 列
+          </span>
+          <span>100%</span>
+          <span>Windows (CRLF)</span>
+          <span>UTF-8</span>
+        </footer>
+      ) : (
+        <ProgressBar
+          percent={current.percent}
+          chapterIndex={current.chapterIndex}
+          chapterCount={book.meta.chapters.length}
+          remainingMinutes={remainingMinutes}
+          onSeek={seek}
+        />
+      )}
 
       {drawer === 'toc' && (
         <TocDrawer

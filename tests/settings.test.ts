@@ -51,6 +51,22 @@ describe('normalizeSettings', () => {
     expect(cleaned.cleaning).toEqual({ enabled: false, disabledBuiltinIds: ['url', 'site'] })
   })
 
+  it('clamps slacking opacity and validates the boss key', () => {
+    const settings = normalizeSettings({
+      slacking: { opacity: 0.1, bossKey: 'Ctrl+Shift+Q', bossKeyAction: 'explode' }
+    })
+    expect(settings.slacking.opacity).toBe(0.6)
+    expect(settings.slacking.bossKey).toBe('Ctrl+Shift+H')
+    expect(settings.slacking.bossKeyAction).toBe('hide')
+  })
+
+  it('merges slacking patches without losing siblings', () => {
+    const merged = mergeSettings(DEFAULT_SETTINGS, { slacking: { opacity: 0.8 } })
+    expect(merged.slacking.opacity).toBe(0.8)
+    expect(merged.slacking.disguise).toBe(false)
+    expect(merged.slacking.bossKey).toBe('Ctrl+Shift+H')
+  })
+
   it('keeps a null max width and merges nested patches', () => {
     expect(normalizeSettings({ typography: { maxContentWidth: null } }).typography.maxContentWidth).toBeNull()
     const merged = mergeSettings(DEFAULT_SETTINGS, { typography: { fontSize: 22 } })

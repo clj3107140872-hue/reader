@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, screen } from 'electron'
 import type { MessageBoxOptions, OpenDialogOptions, WebContents } from 'electron'
 import { join } from 'node:path'
 import type { AppSettings, BookProgress } from '../core/model'
@@ -103,7 +103,61 @@ function sendImportProgress(
   if (!sender.isDestroyed()) sender.send('import:progress', payload)
 }
 
-function createWindow(windowState: AppSettings['window']): void {
+let mainWindow: BrowserWindow | null = null
+let registeredBossKey: string | null = null
+let slackingSettings: AppSettings['slacking'] | null = null
+
+function toggleBossKey(): void {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return
+  if (slackingSettings?.bossKeyAction === 'minimize') {
+    if (win.isMinimized()) {
+      win.restore()
+      win.show()
+      win.focus()
+    } else {
+      win.minimize()
+    }
+    return
+  }
+  if (win.isVisible()) {
+    win.hide()
+  } else {
+    win.show()
+    win.focus()
+  }
+}
+
+function registerBossKey(settings: AppSettings['slacking']): void {
+  if (registeredBossKey) {
+    globalShortcut.unregister(registeredBossKey)
+    registeredBossKey = null
+  }
+  // Acceptance runs must never grab keys on the user's desktop.
+  if (ACCEPTANCE || !settings.bossKey) return
+  try {
+    if (globalShortcut.register(settings.bossKey, toggleBossKey)) {
+      registeredBossKey = settings.bossKey
+    } else {
+      logger.info(`boss key registration failed: ${settings.bossKey}`)
+    }
+  } catch (error) {
+    logger.info(`boss key registration error: ${String(error)}`)
+  }
+}
+
+function applySlackingSettings(settings: AppSettings['slacking']): void {
+  slackingSettings = settings
+  const win = mainWindow
+  if (win && !win.isDestroyed()) {
+    win.setOpacity(settings.opacity)
+    win.setAlwaysOnTop(settings.alwaysOnTop)
+  }
+  registerBossKey(settings)
+}
+
+function createWindow(settings: AppSettings): void {
+  const windowState = settings.window
   const primary = screen.getPrimaryDisplay()
   const clamped = ACCEPTANCE
     ? windowState
@@ -122,6 +176,8 @@ function createWindow(windowState: AppSettings['window']): void {
     show: !ACCEPTANCE,
     skipTaskbar: ACCEPTANCE,
     focusable: !ACCEPTANCE,
+    opacity: settings.slacking.opacity,
+    alwaysOnTop: settings.slacking.alwaysOnTop,
     minWidth: 800,
     minHeight: 600,
     webPreferences: {
@@ -154,6 +210,11 @@ function createWindow(windowState: AppSettings['window']): void {
       settingsRepo.updateSync({ window: { ...bounds, maximized: win.isMaximized() } })
     })
   }
+  mainWindow = win
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null
+  })
+  applySlackingSettings(settings.slacking)
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
@@ -182,7 +243,13 @@ if (hasSingleInstanceLock) {
     ipcMain.handle('app:ping', () => 'pong')
     ipcMain.handle('app:startup-notice', () => startupNotice)
     ipcMain.handle('settings:get', () => settingsRepo.read())
-    ipcMain.handle('settings:update', (_event, patch: SettingsPatch) => settingsRepo.update(patch))
+    ipcMain.handle('settings:update', async (_event, patch: SettingsPatch) => {
+      const saved = await settingsRepo.update(patch)
+      // Only window-level slacking settings need to be pushed to Electron; a
+      // font-size drag should not re-register the boss key on every tick.
+      if (patch?.slacking) applySlackingSettings(saved.slacking)
+      return saved
+    })
     ipcMain.handle('window:toggle-fullscreen', (event) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       if (!win) return false
@@ -306,7 +373,8 @@ if (hasSingleInstanceLock) {
     })
 
     // Development only: lets automation import files without driving the native
-    // dialog. Packaged builds do not register this handler.
+    // dialog, and exercise the boss key without registering a real shortcut.
+    // Packaged builds do not register these handlers.
     if (!app.isPackaged) {
       ipcMain.handle('debug:import', (event, paths: string[]) => {
         const safePaths = Array.isArray(paths)
@@ -316,12 +384,30 @@ if (hasSingleInstanceLock) {
           sendImportProgress(event.sender, payload)
         )
       })
+      ipcMain.handle('debug:boss-toggle', () => {
+        toggleBossKey()
+      })
+      ipcMain.handle('debug:window-state', () => {
+        const win = mainWindow
+        if (!win || win.isDestroyed()) return null
+        return {
+          visible: win.isVisible(),
+          minimised: win.isMinimized(),
+          opacity: win.getOpacity(),
+          alwaysOnTop: win.isAlwaysOnTop(),
+          bossKey: registeredBossKey
+        }
+      })
     }
 
     // Renderer-owned shortcuts (F11, Ctrl+-) must not be shadowed by Electron's
     // default menu accelerators, and the default Reload/DevTools entries stay out.
     Menu.setApplicationMenu(null)
-    createWindow(settings.window)
+    createWindow(settings)
+  })
+
+  app.on('will-quit', () => {
+    globalShortcut.unregisterAll()
   })
 
   app.on('window-all-closed', () => {
@@ -330,7 +416,7 @@ if (hasSingleInstanceLock) {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      void settingsRepo.read().then((settings) => createWindow(settings.window))
+      void settingsRepo.read().then((settings) => createWindow(settings))
     }
   })
 }

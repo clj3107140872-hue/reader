@@ -1,9 +1,16 @@
-import type { AppSettings, ThemeMode, ThemeName } from '../core/model'
+import type { AppSettings, BossKeyAction, ThemeMode, ThemeName } from '../core/model'
 
 export const DEFAULT_SETTINGS: AppSettings = {
   version: 1,
   theme: 'light',
   themeMode: 'day',
+  slacking: {
+    disguise: false,
+    opacity: 1,
+    alwaysOnTop: false,
+    bossKey: 'Ctrl+Shift+H',
+    bossKeyAction: 'hide'
+  },
   typography: {
     fontFamily: "'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif",
     fontSize: 18,
@@ -26,6 +33,19 @@ export const THEME_MODE_OPTIONS: { id: ThemeMode; label: string }[] = [
   { id: 'day', label: '日间' },
   { id: 'night', label: '夜间' },
   { id: 'system', label: '跟随系统' }
+]
+
+export const BOSS_KEY_OPTIONS = [
+  { id: 'Ctrl+Shift+H', label: 'Ctrl+Shift+H' },
+  { id: 'Ctrl+Shift+J', label: 'Ctrl+Shift+J' },
+  { id: 'Alt+Q', label: 'Alt+Q' },
+  { id: 'Ctrl+Alt+H', label: 'Ctrl+Alt+H' },
+  { id: '', label: '关闭老板键' }
+] as const
+
+export const BOSS_KEY_ACTIONS: { id: BossKeyAction; label: string }[] = [
+  { id: 'hide', label: '隐藏窗口' },
+  { id: 'minimize', label: '最小化窗口' }
 ]
 
 /** Picks the palette that should actually render for the current mode. */
@@ -59,6 +79,7 @@ function clamp(value: unknown, min: number, max: number, fallback: number): numb
 export interface SettingsPatch {
   theme?: ThemeName
   themeMode?: ThemeMode
+  slacking?: Partial<AppSettings['slacking']>
   typography?: Partial<AppSettings['typography']>
   cleaning?: Partial<AppSettings['cleaning']>
   window?: Partial<AppSettings['window']>
@@ -69,6 +90,7 @@ export function normalizeSettings(input: unknown): AppSettings {
   const typography = (raw.typography ?? {}) as Partial<AppSettings['typography']>
   const cleaning = (raw.cleaning ?? {}) as Partial<AppSettings['cleaning']>
   const windowState = (raw.window ?? {}) as Partial<AppSettings['window']>
+  const slacking = (raw.slacking ?? {}) as Partial<AppSettings['slacking']>
   const maxWidth = typography.maxContentWidth
   const { theme, themeMode } = normalizeTheme(raw)
 
@@ -76,6 +98,17 @@ export function normalizeSettings(input: unknown): AppSettings {
     version: 1,
     theme,
     themeMode,
+    slacking: {
+      disguise: slacking.disguise === true,
+      opacity: clamp(slacking.opacity, 0.6, 1, DEFAULT_SETTINGS.slacking.opacity),
+      alwaysOnTop: slacking.alwaysOnTop === true,
+      bossKey: BOSS_KEY_OPTIONS.some((option) => option.id === slacking.bossKey)
+        ? (slacking.bossKey as string)
+        : DEFAULT_SETTINGS.slacking.bossKey,
+      bossKeyAction: BOSS_KEY_ACTIONS.some((action) => action.id === slacking.bossKeyAction)
+        ? (slacking.bossKeyAction as BossKeyAction)
+        : DEFAULT_SETTINGS.slacking.bossKeyAction
+    },
     typography: {
       fontFamily:
         typeof typography.fontFamily === 'string' && typography.fontFamily.trim()
@@ -132,6 +165,7 @@ export function mergeSettings(base: AppSettings, patch: SettingsPatch): AppSetti
   return normalizeSettings({
     ...base,
     ...patch,
+    slacking: { ...base.slacking, ...patch.slacking },
     typography: { ...base.typography, ...patch.typography },
     cleaning: { ...base.cleaning, ...patch.cleaning },
     window: { ...base.window, ...patch.window }

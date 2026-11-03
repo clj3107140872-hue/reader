@@ -9,6 +9,8 @@ const api: ReaderApi = {
   importPaths: (paths) => ipcRenderer.invoke('library:import-paths', paths),
   pathForFile: (file) => webUtils.getPathForFile(file as File),
   debugImport: (paths) => ipcRenderer.invoke('debug:import', paths),
+  debugBossToggle: () => ipcRenderer.invoke('debug:boss-toggle'),
+  debugWindowState: () => ipcRenderer.invoke('debug:window-state'),
   onImportProgress: (callback) => {
     const listener = (_event: unknown, payload: { fileName: string; stage: string }): void => {
       callback(payload)
