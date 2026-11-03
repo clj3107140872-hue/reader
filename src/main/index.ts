@@ -395,7 +395,7 @@ function createWindow(
     resizable: kind !== 'transparent',
     hasShadow: kind !== 'transparent',
     backgroundColor:
-      kind === 'transparent' ? '#00000000' : kind === 'code' ? '#1e1e1e' : '#f5f3ee',
+      kind === 'transparent' ? '#00000000' : kind === 'code' ? '#121314' : '#f5f3ee',
     opacity: settings.slacking.opacity,
     alwaysOnTop: settings.slacking.alwaysOnTop,
     minWidth: minWindowSize(kind).width,

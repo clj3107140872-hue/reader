@@ -24,6 +24,7 @@ import {
   CODE_ROW_HEIGHT,
   codeLayout
 } from '../reader/codeLayout'
+import { wheelLineStep } from '../reader/codeWheel'
 import {
   charsBefore,
   nearestIndexByTop,
@@ -85,8 +86,6 @@ const NOTEPAD_MENUS = ['文件', '编辑', '格式', '查看', '帮助'] as cons
 
 const RESIZE_EDGES: WindowResizeEdge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 const CODE_LINES_KEY = 'reader.codeCommentLines'
-/** Wheel travel, in pixels, that advances the comment text by one line. */
-const WHEEL_LINE_STEP = 50
 
 function readCommentLines(): number {
   try {
@@ -623,7 +622,7 @@ export default function Reader({
   }, [book, currentPosition, paragraphs, scheduleSave])
 
   // A half-scrolled line would give the disguise away, so any scroll (including
-  // drag-selection auto-scroll) is pulled back onto the 20px line grid.
+  // drag-selection auto-scroll) is pulled back onto the editor's line grid.
   const handleCommentScroll = useCallback((): void => {
     const scroller = scrollRef.current
     if (scroller) {
@@ -679,19 +678,17 @@ export default function Reader({
     if (!scroller || !target) return
 
     if (style === 'code') {
-      // Trackpads emit many small deltas; accumulate them until a full line is
-      // due, then jump exactly one line so no half line ever shows.
+      // One wheel notch moves exactly one line; small trackpad deltas
+      // accumulate. Always take the event so the browser never jumps a screen.
       let travel = 0
       const handleWheel = (event: WheelEvent): void => {
         if (event.ctrlKey || event.shiftKey) return
-        if (event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return
         if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
         event.preventDefault()
-        travel += event.deltaY
-        const lines = Math.trunc(travel / WHEEL_LINE_STEP)
-        if (lines === 0) return
-        travel -= lines * WHEEL_LINE_STEP
-        scroller.scrollTop += lines * CODE_ROW_HEIGHT
+        const step = wheelLineStep(event.deltaY, event.deltaMode, travel)
+        travel = step.travel
+        if (step.lines === 0) return
+        scroller.scrollTop += step.lines * CODE_ROW_HEIGHT
       }
 
       target.addEventListener('wheel', handleWheel, { passive: false })

@@ -5,8 +5,8 @@ describe('codeLayout', () => {
   it('keeps the requested comment lines when the window has room', () => {
     const layout = codeLayout(800, 4)
     expect(layout.lines).toBe(4)
-    expect(layout.topRows).toBe(18)
-    expect(layout.bottomRows).toBe(18)
+    expect(layout.topRows).toBe(19)
+    expect(layout.bottomRows).toBe(19)
   })
 
   it('reserves one code line above and below when the window is too short', () => {

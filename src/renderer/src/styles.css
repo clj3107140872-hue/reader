@@ -7,7 +7,7 @@ body {
 }
 /* A transparent Electron window only looks transparent when the page is too. */
 body[data-slacking='transparent'] { background: transparent; }
-body[data-slacking='code'] { background: #1e1e1e; }
+body[data-slacking='code'] { background: #121314; }
 .app { padding: 24px 32px; }
 .toolbar {
   display: flex;
@@ -759,18 +759,18 @@ body[data-slacking='code'] { background: #1e1e1e; }
 .window-resize-nw { top: 0; left: 0; cursor: nwse-resize; }
 .window-resize-se { bottom: 0; right: 0; cursor: nwse-resize; }
 
-/* 代码注释：a VS Code-ish shell with fixed code and scrolling comments. */
+/* 代码注释：matches VS Code's 2026 Dark theme (editor #121314, 14px Consolas, 19px rows). */
 .reader[data-slacking='code'] {
-  --reader-bg: #1e1e1e;
-  --reader-text: #d4d4d4;
-  --reader-muted: #858585;
-  --reader-border: #2b2b2b;
-  --reader-accent: #4fc1ff;
-  --reader-hover: #2a2d2e;
-  --reader-panel: #252526;
-  --reader-panel-strong: #1e1e1e;
-  background: #1e1e1e;
-  color: #d4d4d4;
+  --reader-bg: #121314;
+  --reader-text: #bbbebf;
+  --reader-muted: #858889;
+  --reader-border: #2a2b2c;
+  --reader-accent: #48a0c7;
+  --reader-hover: #202122;
+  --reader-panel: #202122;
+  --reader-panel-strong: #121314;
+  background: #121314;
+  color: #bbbebf;
   overflow: hidden;
 }
 .vscode-editor {
@@ -778,57 +778,58 @@ body[data-slacking='code'] { background: #1e1e1e; }
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: #1e1e1e;
+  background: #121314;
   overflow: hidden;
 }
-/* Panes hold whole 20px rows; the band in between is the only scrolling part. */
+/* Panes hold whole 19px rows; the band in between is the only scrolling part. */
 .vscode-code {
   flex: 0 0 auto;
   overflow: hidden;
 }
 .vscode-code-row {
   display: flex;
-  height: 20px;
-  line-height: 20px;
+  height: 19px;
+  line-height: 19px;
   font-family: 'Consolas', 'Courier New', monospace;
   font-size: 14px;
+  color: #c9d1d9;
   white-space: pre;
   user-select: none;
 }
 .vscode-line-number,
 .vscode-comment-gutter {
-  flex: 0 0 58px;
-  width: 58px;
-  padding-right: 16px;
+  flex: 0 0 72px;
+  width: 72px;
+  padding-right: 31px;
   text-align: right;
-  color: #858585;
+  color: #858889;
   font-family: 'Consolas', 'Courier New', monospace;
   font-size: 14px;
-  line-height: 20px;
+  line-height: 19px;
   user-select: none;
 }
 .vscode-code-text { flex: 1 1 auto; overflow: hidden; }
-.tok-kw { color: #569cd6; }
-.tok-str { color: #ce9178; }
-.tok-fn { color: #dcdcaa; }
-.tok-comment { color: #6a9955; }
-.tok-num { color: #b5cea8; }
+.tok-kw { color: #ff7b72; }
+.tok-str { color: #a5d6ff; }
+.tok-fn { color: #d2a8ff; }
+.tok-comment { color: #8b949e; }
+.tok-num { color: #79c0ff; }
 .vscode-comment-band {
   position: relative;
   flex: 0 0 auto;
   display: flex;
-  background: #1e1e1e;
+  background: #121314;
 }
 .vscode-comment-gutter {
-  flex: 0 0 58px;
-  width: 58px;
+  flex: 0 0 72px;
+  width: 72px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 .vscode-comment-gutter span {
   display: block;
-  height: 20px;
+  height: 19px;
 }
 .vscode-comment-scroll {
   flex: 1 1 auto;
@@ -858,10 +859,10 @@ body[data-slacking='code'] { background: #1e1e1e; }
   padding: 0 8px 0 0;
   font-family: 'Consolas', 'Courier New', monospace;
   font-size: 14px;
-  line-height: 20px;
-  color: #6a9955;
+  line-height: 19px;
+  color: #8b949e;
 }
-/* Every line must occupy its real 20px box; content-visibility would give
+/* Every line must occupy its real 19px box; content-visibility would give
    off-screen chapters estimated heights and break line snapping. */
 .reader[data-slacking='code'] .reader-chapter {
   content-visibility: visible;
@@ -875,7 +876,7 @@ body[data-slacking='code'] { background: #1e1e1e; }
 .reader[data-slacking='code'] .reader-paragraph::before,
 .reader[data-slacking='code'] .chapter-title::before {
   content: '// ';
-  color: #6a9955;
+  color: #8b949e;
 }
 .reader[data-slacking='code'] .chapter-title {
   margin: 0;
@@ -883,9 +884,9 @@ body[data-slacking='code'] { background: #1e1e1e; }
   border: none;
   font-size: 14px;
   font-weight: 400;
-  line-height: 20px;
+  line-height: 19px;
   white-space: pre-wrap;
-  color: #6a9955;
+  color: #8b949e;
 }
 .reader[data-slacking='code'] .chapter-title,
 .reader[data-slacking='code'] .reader-paragraph {

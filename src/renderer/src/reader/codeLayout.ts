@@ -1,5 +1,5 @@
-/** Matches the code font's fixed line box in the code disguise. */
-export const CODE_ROW_HEIGHT = 20
+/** VS Code's default 14px Consolas line box (14 × 1.35, rounded). */
+export const CODE_ROW_HEIGHT = 19
 export const CODE_COMMENT_MIN = 2
 export const CODE_COMMENT_MAX = 12
 export const CODE_COMMENT_DEFAULT = 4
