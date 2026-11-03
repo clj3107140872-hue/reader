@@ -3,6 +3,7 @@ import type { AppSettings, ThemeName } from '../../../core/model'
 import {
   BOSS_KEY_ACTIONS,
   BOSS_KEY_OPTIONS,
+  DISGUISE_OPTIONS,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
   THEME_MODE_OPTIONS
@@ -205,14 +206,19 @@ export default function SettingsPanel({
 
       <section className="setting-group">
         <h3>摸鱼模式</h3>
-        <button
-          className={`setting-button ${slacking.disguise ? 'active' : ''}`}
-          onClick={() => onChange({ slacking: { disguise: !slacking.disguise } })}
-        >
-          {slacking.disguise ? '退出伪装（Esc）' : '进入伪装'}
-        </button>
+        <div className="disguise-grid" role="group" aria-label="伪装样式">
+          {DISGUISE_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              className={`disguise-option ${slacking.disguise === option.id ? 'active' : ''}`}
+              onClick={() => onChange({ slacking: { disguise: option.id } })}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
         <p className="setting-hint">
-          伪装成记事本：窗口标题改为「工作文档.txt - 记事本」，正文改用等宽字体并隐藏阅读器工具栏。
+          {DISGUISE_OPTIONS.find((option) => option.id === slacking.disguise)?.hint}
         </p>
 
         <label className="setting-row">

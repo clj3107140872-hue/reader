@@ -1,6 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { AppSettings, BookMeta, Bookmark, BookProgress, ThemeName } from '../../../core/model'
+import type {
+  AppSettings,
+  BookMeta,
+  Bookmark,
+  BookProgress,
+  DisguiseStyle,
+  ThemeName
+} from '../../../core/model'
 import { splitParagraphs } from '../../../core/paragraphs'
 import type { OpenBookPayload } from '../../../shared/api'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../../shared/settings'
@@ -61,9 +68,99 @@ function positionInSection(
   return { chapterIndex, paragraphIndex: Number(paragraph.dataset.paragraphIndex) }
 }
 
-const NOTEPAD_DISGUISE_TITLE = '工作文档.txt - 记事本'
+const DISGUISE_TITLES: Record<Exclude<DisguiseStyle, 'none'>, string> = {
+  notepad: '工作文档.txt - 记事本',
+  transparent: '工作文档.txt - 记事本',
+  code: 'codenovel.js - Visual Studio Code'
+}
 
 const NOTEPAD_MENUS = ['文件', '编辑', '格式', '查看', '帮助'] as const
+
+type CodeTokenKind = 'kw' | 'str' | 'fn' | 'comment' | 'num'
+
+interface CodeToken {
+  text: string
+  kind?: CodeTokenKind
+}
+
+/** Colours keywords, strings, comments, numbers and calls like an editor. */
+const CODE_TOKEN_PATTERN =
+  /(\/\/.*$|'[^']*'|"[^"]*"|\b\d+\b|\b(?:import|from|const|new|export|function|return|true|false)\b|\b[A-Za-z_$][\w$]*(?=\())/g
+
+function highlightCode(line: string): CodeToken[] {
+  const tokens: CodeToken[] = []
+  let lastIndex = 0
+  for (const match of line.matchAll(CODE_TOKEN_PATTERN)) {
+    const index = match.index ?? 0
+    if (index > lastIndex) tokens.push({ text: line.slice(lastIndex, index) })
+    const text = match[0]
+    let kind: CodeTokenKind
+    if (text.startsWith('//')) kind = 'comment'
+    else if (/^['"]/.test(text)) kind = 'str'
+    else if (/^\d/.test(text)) kind = 'num'
+    else if (/^(import|from|const|new|export|function|return|true|false)$/.test(text)) kind = 'kw'
+    else kind = 'fn'
+    tokens.push({ text, kind })
+    lastIndex = index + text.length
+  }
+  if (lastIndex < line.length) tokens.push({ text: line.slice(lastIndex) })
+  return tokens
+}
+
+/** Decorative code that stays put above and below the scrolling comments. */
+const CODE_TOP = [
+  "import { Novel } from './novel'",
+  '',
+  'const chapter = new Novel({',
+  "  title: '工作文档',",
+  "  mode: 'reading',",
+  '  autoSave: true',
+  '})',
+  ''
+]
+
+const CODE_BOTTOM = [
+  '',
+  'export function readChapter() {',
+  '  return chapter.next()',
+  '}',
+  '',
+  '// TODO: keep reading'
+]
+
+/** The bottom block pretends the file has scrolled much further down. */
+const CODE_BOTTOM_START = 412
+
+const COMMENT_LINE_NUMBERS = Array.from({ length: 80 }, (_, index) => 9 + index)
+
+interface CodeRowsProps {
+  lines: string[]
+  start: number
+}
+
+function CodeRows({ lines, start }: CodeRowsProps) {
+  return (
+    <div className="vscode-code" aria-hidden="true">
+      {lines.map((line, index) => (
+        <div className="vscode-code-row" key={index}>
+          <span className="vscode-line-number">{start + index}</span>
+          <span className="vscode-code-text">
+            {line.length === 0
+              ? ' '
+              : highlightCode(line).map((token, tokenIndex) => (
+                  <span
+                    key={tokenIndex}
+                    className={token.kind ? `tok-${token.kind}` : undefined}
+                  >
+                    {token.text}
+                  </span>
+                ))}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 interface NotepadMenubarProps {
   fileMenuOpen: boolean
@@ -159,7 +256,9 @@ export default function Reader({
   const [notice, setNotice] = useState('')
   const [warningHidden, setWarningHidden] = useState(false)
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
-  const disguise = settings.slacking.disguise
+  const [backdropDark, setBackdropDark] = useState(false)
+  const style = settings.slacking.disguise
+  const disguised = style !== 'none'
   const scrollRef = useRef<HTMLElement | null>(null)
   const restoredRef = useRef(false)
   const rafRef = useRef(0)
@@ -194,23 +293,30 @@ export default function Reader({
     return () => window.clearTimeout(timer)
   }, [notice])
 
-  // A drawer on top of the fake Notepad would break the illusion.
+  // A drawer on top of a disguise would break the illusion.
   useEffect(() => {
-    if (disguise) setDrawer(null)
-  }, [disguise])
+    if (disguised) setDrawer(null)
+  }, [disguised])
 
   // Disguised reads rename the OS window too, otherwise the taskbar gives it away.
+  const disguiseTitle = style === 'none' ? null : DISGUISE_TITLES[style]
   useEffect(() => {
-    if (!disguise) return
+    if (!disguiseTitle) return
     const previous = document.title
-    document.title = NOTEPAD_DISGUISE_TITLE
+    document.title = disguiseTitle
     return () => {
       document.title = previous
     }
-  }, [disguise])
+  }, [disguiseTitle])
 
-  const setDisguise = useCallback(
-    (next: boolean): void => {
+  // The transparent window samples the desktop behind it and reports whether
+  // the text needs to be light or dark.
+  useEffect(() => {
+    return window.api.onBackdropTone((payload) => setBackdropDark(payload.dark))
+  }, [])
+
+  const setDisguiseStyle = useCallback(
+    (next: DisguiseStyle): void => {
       setFileMenuOpen(false)
       onSettingsChange({ slacking: { disguise: next } })
     },
@@ -236,6 +342,15 @@ export default function Reader({
     pendingRef.current = null
     if (pending) void window.api.saveProgress(bookId, pending).catch(() => undefined)
   }, [bookId])
+
+  // The main process recreates the window when the disguise changes the frame.
+  // Persist first, then acknowledge, so the book reopens at the same spot.
+  useEffect(() => {
+    return window.api.onFlushRequest(() => {
+      flush()
+      window.api.notifyFlushed()
+    })
+  }, [flush])
 
   const scheduleSave = useCallback(
     (position: CurrentPosition): void => {
@@ -272,7 +387,7 @@ export default function Reader({
     if (!scroller) return null
     const rect = scroller.getBoundingClientRect()
     const x = rect.left + rect.width / 2
-    const y = rect.top + 88
+    const y = rect.top + Math.min(88, rect.height / 2)
 
     for (const element of document.elementsFromPoint(x, y)) {
       const paragraph = element.closest<HTMLElement>('[data-paragraph-index]')
@@ -506,6 +621,9 @@ export default function Reader({
         return
       }
 
+      // Reader shortcuts would expose the disguise; only paging keys stay.
+      if ((event.ctrlKey || event.metaKey) && disguised) return
+
       if (event.ctrlKey || event.metaKey) {
         switch (event.key) {
           case 'f':
@@ -533,7 +651,7 @@ export default function Reader({
       if (event.key === 'Escape') {
         event.preventDefault()
         if (drawer) setDrawer(null)
-        else if (disguise) setDisguise(false)
+        else if (style !== 'none') setDisguiseStyle('none')
         else onBack()
         return
       }
@@ -571,12 +689,13 @@ export default function Reader({
   }, [
     changeFontSize,
     current.chapterIndex,
-    disguise,
+    disguised,
     drawer,
     jumpToChapter,
     onBack,
     scrollByScreen,
-    setDisguise,
+    setDisguiseStyle,
+    style,
     toggleBookmark
   ])
 
@@ -611,17 +730,11 @@ export default function Reader({
     <div
       className="reader"
       data-theme={theme}
-      data-slacking={disguise ? 'on' : undefined}
+      data-slacking={disguised ? style : undefined}
+      data-backdrop={backdropDark ? 'dark' : 'light'}
       style={readerStyle}
     >
-      {disguise ? (
-        <NotepadMenubar
-          fileMenuOpen={fileMenuOpen}
-          onToggleFileMenu={() => setFileMenuOpen((open) => !open)}
-          onCloseFileMenu={() => setFileMenuOpen(false)}
-          onExitDisguise={() => setDisguise(false)}
-        />
-      ) : (
+      {style === 'none' && (
         <header className="reader-toolbar">
           <button className="ghost" onClick={onBack}>
             ← 书架
@@ -644,15 +757,44 @@ export default function Reader({
           </button>
           <button
             className="ghost slacking-entry"
-            onClick={() => setDisguise(true)}
-            title="伪装成记事本，按 Esc 退出"
+            onClick={() => setDisguiseStyle('notepad')}
+            title="伪装成记事本，按 Esc 退出；其它样式在设置里选"
           >
             摸鱼
           </button>
         </header>
       )}
 
-      {book.warnings.length > 0 && !warningHidden && !disguise && (
+      {style === 'notepad' && (
+        <NotepadMenubar
+          fileMenuOpen={fileMenuOpen}
+          onToggleFileMenu={() => setFileMenuOpen((open) => !open)}
+          onCloseFileMenu={() => setFileMenuOpen(false)}
+          onExitDisguise={() => setDisguiseStyle('none')}
+        />
+      )}
+
+      {style === 'code' && (
+        <div className="vscode-tabbar">
+          <div className="vscode-tab">codenovel.js</div>
+          <div className="vscode-tabbar-fill" />
+        </div>
+      )}
+
+      {style === 'transparent' && <div className="transparent-drag-strip" />}
+
+      {(style === 'transparent' || style === 'code') && (
+        <button
+          className="disguise-exit"
+          onClick={() => setDisguiseStyle('none')}
+          title="退出伪装（Esc）"
+          aria-label="退出伪装"
+        >
+          ×
+        </button>
+      )}
+
+      {book.warnings.length > 0 && !warningHidden && !disguised && (
         <div className="reader-warning" role="status">
           <span>{book.warnings.join('；')}</span>
           <button className="ghost" onClick={() => setWarningHidden(true)}>
@@ -661,11 +803,36 @@ export default function Reader({
         </div>
       )}
 
-      <main className="reader-scroll" ref={scrollRef} onScroll={handleScroll}>
-        <ReaderBody chapters={chapters} />
-      </main>
+      {style === 'code' ? (
+        <div className="vscode-editor">
+          <CodeRows lines={CODE_TOP} start={1} />
+          <div className="vscode-comment-band">
+            <div className="vscode-comment-gutter" aria-hidden="true">
+              {COMMENT_LINE_NUMBERS.map((line) => (
+                <span key={line}>{line}</span>
+              ))}
+            </div>
+            <main
+              className="reader-scroll vscode-comment-scroll"
+              ref={scrollRef}
+              onScroll={handleScroll}
+            >
+              <ReaderBody chapters={chapters} />
+            </main>
+          </div>
+          <CodeRows lines={CODE_BOTTOM} start={CODE_BOTTOM_START} />
+        </div>
+      ) : (
+        <main
+          className={style === 'transparent' ? 'reader-scroll transparent-scroll' : 'reader-scroll'}
+          ref={scrollRef}
+          onScroll={handleScroll}
+        >
+          <ReaderBody chapters={chapters} />
+        </main>
+      )}
 
-      {disguise ? (
+      {style === 'notepad' && (
         <footer className="notepad-statusbar">
           <span className="notepad-status-start">
             第 {current.paragraphIndex + 1} 行，第 1 列
@@ -674,7 +841,20 @@ export default function Reader({
           <span>Windows (CRLF)</span>
           <span>UTF-8</span>
         </footer>
-      ) : (
+      )}
+
+      {style === 'code' && (
+        <footer className="vscode-statusbar">
+          <span>main</span>
+          <span>0 ⚠ 0 ✖</span>
+          <span className="vscode-status-spacer" />
+          <span>Ln {current.paragraphIndex + 1}, Col 1</span>
+          <span>UTF-8</span>
+          <span>JavaScript</span>
+        </footer>
+      )}
+
+      {style === 'none' && (
         <ProgressBar
           percent={current.percent}
           chapterIndex={current.chapterIndex}
@@ -684,41 +864,45 @@ export default function Reader({
         />
       )}
 
-      {drawer === 'toc' && (
-        <TocDrawer
-          chapters={book.meta.chapters}
-          currentIndex={current.chapterIndex}
-          onSelect={jumpToChapter}
-          onClose={() => setDrawer(null)}
-        />
-      )}
+      {style === 'none' && (
+        <>
+          {drawer === 'toc' && (
+            <TocDrawer
+              chapters={book.meta.chapters}
+              currentIndex={current.chapterIndex}
+              onSelect={jumpToChapter}
+              onClose={() => setDrawer(null)}
+            />
+          )}
 
-      {drawer === 'search' && (
-        <SearchPanel
-          bookId={bookId}
-          chapters={book.meta.chapters}
-          onJump={jumpToPosition}
-          onClose={() => setDrawer(null)}
-        />
-      )}
+          {drawer === 'search' && (
+            <SearchPanel
+              bookId={bookId}
+              chapters={book.meta.chapters}
+              onJump={jumpToPosition}
+              onClose={() => setDrawer(null)}
+            />
+          )}
 
-      {drawer === 'settings' && (
-        <SettingsPanel
-          settings={settings}
-          resolvedTheme={theme}
-          onChange={onSettingsChange}
-          onClose={() => setDrawer(null)}
-        />
-      )}
+          {drawer === 'settings' && (
+            <SettingsPanel
+              settings={settings}
+              resolvedTheme={theme}
+              onChange={onSettingsChange}
+              onClose={() => setDrawer(null)}
+            />
+          )}
 
-      {drawer === 'bookmarks' && (
-        <BookmarksPanel
-          bookmarks={bookmarks}
-          chapters={book.meta.chapters}
-          onJump={jumpToPosition}
-          onDelete={deleteBookmark}
-          onClose={() => setDrawer(null)}
-        />
+          {drawer === 'bookmarks' && (
+            <BookmarksPanel
+              bookmarks={bookmarks}
+              chapters={book.meta.chapters}
+              onJump={jumpToPosition}
+              onDelete={deleteBookmark}
+              onClose={() => setDrawer(null)}
+            />
+          )}
+        </>
       )}
 
       {notice && <div className="reader-notice">{notice}</div>}

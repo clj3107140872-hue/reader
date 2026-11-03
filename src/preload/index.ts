@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { ReaderApi, SearchProgress } from '../shared/api'
+import type { BackdropTone, ReaderApi, SearchProgress } from '../shared/api'
 
 const api: ReaderApi = {
   ping: () => ipcRenderer.invoke('app:ping'),
@@ -10,7 +10,26 @@ const api: ReaderApi = {
   pathForFile: (file) => webUtils.getPathForFile(file as File),
   debugImport: (paths) => ipcRenderer.invoke('debug:import', paths),
   debugBossToggle: () => ipcRenderer.invoke('debug:boss-toggle'),
+  debugSetBackdrop: (dark) => ipcRenderer.invoke('debug:backdrop', dark),
   debugWindowState: () => ipcRenderer.invoke('debug:window-state'),
+  setViewState: (bookId) => ipcRenderer.invoke('app:view-state', bookId),
+  onFlushRequest: (callback) => {
+    const listener = (): void => callback()
+    ipcRenderer.on('app:flush-request', listener)
+    return () => {
+      ipcRenderer.removeListener('app:flush-request', listener)
+    }
+  },
+  notifyFlushed: () => {
+    ipcRenderer.send('app:flush-done')
+  },
+  onBackdropTone: (callback) => {
+    const listener = (_event: unknown, payload: BackdropTone): void => callback(payload)
+    ipcRenderer.on('slacking:backdrop', listener)
+    return () => {
+      ipcRenderer.removeListener('slacking:backdrop', listener)
+    }
+  },
   onImportProgress: (callback) => {
     const listener = (_event: unknown, payload: { fileName: string; stage: string }): void => {
       callback(payload)

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SettingsRepository } from '../src/main/storage/settings'
 import {
   DEFAULT_SETTINGS,
+  disguiseWindowKind,
   mergeSettings,
   normalizeSettings,
   resolveTheme
@@ -60,11 +61,28 @@ describe('normalizeSettings', () => {
     expect(settings.slacking.bossKeyAction).toBe('hide')
   })
 
+  it('migrates a legacy disguise boolean to a style', () => {
+    expect(normalizeSettings({ slacking: { disguise: true } }).slacking.disguise).toBe('notepad')
+    expect(normalizeSettings({ slacking: { disguise: false } }).slacking.disguise).toBe('none')
+    expect(normalizeSettings({ slacking: { disguise: 'transparent' } }).slacking.disguise).toBe(
+      'transparent'
+    )
+    expect(normalizeSettings({ slacking: { disguise: 'hologram' } }).slacking.disguise).toBe('none')
+  })
+
   it('merges slacking patches without losing siblings', () => {
     const merged = mergeSettings(DEFAULT_SETTINGS, { slacking: { opacity: 0.8 } })
     expect(merged.slacking.opacity).toBe(0.8)
-    expect(merged.slacking.disguise).toBe(false)
+    expect(merged.slacking.disguise).toBe('none')
     expect(merged.slacking.bossKey).toBe('Ctrl+Shift+H')
+  })
+
+  it('only gives transparent and code styles their own window while a book is open', () => {
+    expect(disguiseWindowKind('transparent', true)).toBe('transparent')
+    expect(disguiseWindowKind('code', true)).toBe('code')
+    expect(disguiseWindowKind('transparent', false)).toBe('normal')
+    expect(disguiseWindowKind('notepad', true)).toBe('normal')
+    expect(disguiseWindowKind('none', true)).toBe('normal')
   })
 
   it('keeps a null max width and merges nested patches', () => {

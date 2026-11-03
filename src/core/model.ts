@@ -81,10 +81,11 @@ export interface AdRule {
 export type ThemeName = 'light' | 'dark' | 'green' | 'sepia'
 export type ThemeMode = 'day' | 'night' | 'system'
 export type BossKeyAction = 'hide' | 'minimize'
+/** How the reader disguises itself; 'none' turns the disguise off. */
+export type DisguiseStyle = 'none' | 'notepad' | 'transparent' | 'code'
 
 export interface SlackingSettings {
-  /** Renders the reader as a plain-text editor and renames the window. */
-  disguise: boolean
+  disguise: DisguiseStyle
   /** Window opacity, 0.6..1. */
   opacity: number
   alwaysOnTop: boolean

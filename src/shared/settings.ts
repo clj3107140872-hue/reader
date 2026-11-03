@@ -1,11 +1,17 @@
-import type { AppSettings, BossKeyAction, ThemeMode, ThemeName } from '../core/model'
+import type {
+  AppSettings,
+  BossKeyAction,
+  DisguiseStyle,
+  ThemeMode,
+  ThemeName
+} from '../core/model'
 
 export const DEFAULT_SETTINGS: AppSettings = {
   version: 1,
   theme: 'light',
   themeMode: 'day',
   slacking: {
-    disguise: false,
+    disguise: 'none',
     opacity: 1,
     alwaysOnTop: false,
     bossKey: 'Ctrl+Shift+H',
@@ -47,6 +53,40 @@ export const BOSS_KEY_ACTIONS: { id: BossKeyAction; label: string }[] = [
   { id: 'hide', label: '隐藏窗口' },
   { id: 'minimize', label: '最小化窗口' }
 ]
+
+const DISGUISE_STYLES: DisguiseStyle[] = ['none', 'notepad', 'transparent', 'code']
+
+export const DISGUISE_OPTIONS: { id: DisguiseStyle; label: string; hint: string }[] = [
+  { id: 'none', label: '关闭', hint: '正常阅读界面。' },
+  { id: 'notepad', label: '记事本', hint: '窗口和正文伪装成记事本；按 Esc 退出。' },
+  {
+    id: 'transparent',
+    label: '透明悬浮',
+    hint: '隐藏边框与背景，文字颜色随身后的画面自动切换；按 Esc 退出。'
+  },
+  { id: 'code', label: '代码注释', hint: '伪装成编辑器：代码固定不动，正文以注释形式滚动；按 Esc 退出。' }
+]
+
+/** Accepts the current style strings and migrates the old boolean setting. */
+export function normalizeDisguiseStyle(value: unknown): DisguiseStyle {
+  if (value === true) return 'notepad'
+  if (typeof value === 'string' && DISGUISE_STYLES.includes(value as DisguiseStyle)) {
+    return value as DisguiseStyle
+  }
+  return 'none'
+}
+
+export type DisguiseWindowKind = 'normal' | 'transparent' | 'code'
+
+/**
+ * Frameless windows only make sense while a book is open; the library always
+ * keeps a normal frame so the user can still move and resize it.
+ */
+export function disguiseWindowKind(style: DisguiseStyle, hasBook: boolean): DisguiseWindowKind {
+  if (!hasBook) return 'normal'
+  if (style === 'transparent' || style === 'code') return style
+  return 'normal'
+}
 
 /** Picks the palette that should actually render for the current mode. */
 export function resolveTheme(settings: AppSettings, systemPrefersDark: boolean): ThemeName {
@@ -99,7 +139,7 @@ export function normalizeSettings(input: unknown): AppSettings {
     theme,
     themeMode,
     slacking: {
-      disguise: slacking.disguise === true,
+      disguise: normalizeDisguiseStyle(slacking.disguise),
       opacity: clamp(slacking.opacity, 0.6, 1, DEFAULT_SETTINGS.slacking.opacity),
       alwaysOnTop: slacking.alwaysOnTop === true,
       bossKey: BOSS_KEY_OPTIONS.some((option) => option.id === slacking.bossKey)

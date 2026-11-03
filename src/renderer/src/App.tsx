@@ -1,11 +1,32 @@
-import { useEffect, useState } from 'react'
-import type { AppSettings } from '../../core/model'
-import { DEFAULT_SETTINGS, mergeSettings, resolveTheme } from '../../shared/settings'
+import { useEffect, useLayoutEffect, useState } from 'react'
+import type { AppSettings, DisguiseStyle } from '../../core/model'
+import {
+  DEFAULT_SETTINGS,
+  mergeSettings,
+  normalizeDisguiseStyle,
+  resolveTheme
+} from '../../shared/settings'
 import type { SettingsPatch } from '../../shared/settings'
 import Library from './pages/Library'
 import Reader from './pages/Reader'
 
 type View = { name: 'library' } | { name: 'reader'; bookId: string }
+
+// A disguise window is created with the book and style in its URL, so the
+// first paint already looks right instead of flashing the normal reader.
+const initialParams = new URLSearchParams(window.location.search)
+const initialBookId = initialParams.get('bookId')
+const initialStyle: DisguiseStyle = initialBookId
+  ? normalizeDisguiseStyle(initialParams.get('style'))
+  : 'none'
+
+function seededSettings(style: DisguiseStyle): AppSettings {
+  if (style === 'none') return DEFAULT_SETTINGS
+  return {
+    ...DEFAULT_SETTINGS,
+    slacking: { ...DEFAULT_SETTINGS.slacking, disguise: style }
+  }
+}
 
 function useSystemPrefersDark(): boolean {
   const [dark, setDark] = useState(
@@ -24,11 +45,16 @@ function useSystemPrefersDark(): boolean {
 }
 
 export default function App() {
-  const [view, setView] = useState<View>({ name: 'library' })
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  const [view, setView] = useState<View>(() =>
+    initialBookId ? { name: 'reader', bookId: initialBookId } : { name: 'library' }
+  )
+  const [settings, setSettings] = useState<AppSettings>(() => seededSettings(initialStyle))
   const [settingsError, setSettingsError] = useState('')
   const systemPrefersDark = useSystemPrefersDark()
   const theme = resolveTheme(settings, systemPrefersDark)
+  const viewBookId = view.name === 'reader' ? view.bookId : null
+  const activeStyle: DisguiseStyle =
+    view.name === 'reader' ? settings.slacking.disguise : 'none'
 
   useEffect(() => {
     void window.api
@@ -39,6 +65,27 @@ export default function App() {
         setSettingsError('读取设置失败，已使用默认设置')
       })
   }, [])
+
+  // The main process swaps the window when the disguise needs a different
+  // frame; it needs to know whether a book is on screen at all.
+  useEffect(() => {
+    void window.api.setViewState(viewBookId).catch((reason: unknown) => {
+      console.error('同步阅读状态失败', reason)
+    })
+  }, [viewBookId])
+
+  // The window itself is transparent in this mode, so the page background must
+  // be too, or the "transparent" window would still show a beige rectangle.
+  useLayoutEffect(() => {
+    if (activeStyle === 'transparent' || activeStyle === 'code') {
+      document.body.dataset.slacking = activeStyle
+    } else {
+      delete document.body.dataset.slacking
+    }
+    return () => {
+      delete document.body.dataset.slacking
+    }
+  }, [activeStyle])
 
   useEffect(() => {
     if (!settingsError) return

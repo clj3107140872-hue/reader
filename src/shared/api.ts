@@ -6,6 +6,7 @@ import type {
   BookMeta,
   Bookmark,
   BookProgress,
+  DisguiseStyle,
   ImportStats,
   LibraryEntry
 } from '../core/model'
@@ -187,6 +188,14 @@ export interface DebugWindowState {
   opacity: number
   alwaysOnTop: boolean
   bossKey: string | null
+  disguise: DisguiseStyle
+  windowKind: 'normal' | 'transparent' | 'code'
+  resizable: boolean
+}
+
+export interface BackdropTone {
+  /** True when the desktop behind the window is dark, so text should be light. */
+  dark: boolean
 }
 
 export interface ReaderApi {
@@ -201,7 +210,16 @@ export interface ReaderApi {
   debugImport(paths: string[]): Promise<ImportSummary>
   /** Development builds only; runs the boss-key action without a registered shortcut. */
   debugBossToggle(): Promise<void>
+  /** Development builds only; overrides the sampled backdrop tone. */
+  debugSetBackdrop(dark: boolean): Promise<void>
   debugWindowState(): Promise<DebugWindowState | null>
+  /** Tells the main process which page (book or library) the window shows. */
+  setViewState(bookId: string | null): Promise<void>
+  /** The main process asks the reader to persist before its window is replaced. */
+  onFlushRequest(cb: () => void): () => void
+  /** Acknowledges that the reading position has been persisted. */
+  notifyFlushed(): void
+  onBackdropTone(cb: (payload: BackdropTone) => void): () => void
   onImportProgress(cb: (payload: { fileName: string; stage: string }) => void): () => void
   openBook(id: string): Promise<OpenBookPayload>
   saveProgress(id: string, progress: BookProgress): Promise<void>
