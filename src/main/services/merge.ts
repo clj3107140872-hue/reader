@@ -142,7 +142,10 @@ export class MergeService {
         title,
         encoding: targetBook.meta.encoding,
         createdAt: targetBook.meta.createdAt,
-        chapters: merged.chapters
+        chapters: merged.chapters,
+        ...(targetBook.meta.format ? { format: targetBook.meta.format } : {}),
+        ...(targetBook.meta.author ? { author: targetBook.meta.author } : {}),
+        ...(targetBook.meta.cover ? { cover: targetBook.meta.cover } : {})
       })
 
       const targetProgress = await this.books.readProgress(targetId)

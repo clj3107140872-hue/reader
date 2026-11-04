@@ -20,16 +20,29 @@ export default function BookInfo({
     compact && files.length > 3
       ? `${files.slice(0, 3).join('、')} 等 ${files.length} 个文件`
       : files.join('、')
+  const epub = entry.format === 'epub'
   return (
     <dl className="info-list">
       <dt>书名</dt>
       <dd>{entry.title}</dd>
+      {entry.author && (
+        <>
+          <dt>作者</dt>
+          <dd>{entry.author}</dd>
+        </>
+      )}
       <dt>源文件</dt>
       <dd>{fileText}</dd>
+      <dt>格式</dt>
+      <dd>{epub ? 'EPUB' : 'TXT'}</dd>
       <dt>章节</dt>
       <dd>{entry.chapterCount} 章</dd>
-      <dt>编码</dt>
-      <dd>{entry.encoding}</dd>
+      {!epub && (
+        <>
+          <dt>编码</dt>
+          <dd>{entry.encoding}</dd>
+        </>
+      )}
       <dt>阅读</dt>
       <dd>{progress}</dd>
       <dt>清洗</dt>

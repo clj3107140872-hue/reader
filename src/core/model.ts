@@ -11,11 +11,18 @@ export interface ChapterMeta {
   flags: { suspectedDuplicate?: boolean }
 }
 
+export type BookFormat = 'txt' | 'epub'
+
 export interface BookMeta {
   version: 1
   id: string
   title: string
   encoding: string
+  /** Source format; absent on books imported before EPUB support. */
+  format?: BookFormat
+  author?: string
+  /** Present when the book directory holds a cover image. */
+  cover?: { mime: string }
   chapters: ChapterMeta[]
   /** Line numbers the user marked as chapter titles; absent for auto-split books. */
   chapterStarts?: number[]
@@ -38,6 +45,10 @@ export interface ImportStats {
 export interface LibraryEntry {
   id: string
   title: string
+  /** Source format; absent means TXT (shelf entries from before EPUB support). */
+  format?: BookFormat
+  author?: string
+  hasCover?: boolean
   normalizedTitle: string
   sourceFileName: string
   /** Every original file name; set when volumes are merged. */

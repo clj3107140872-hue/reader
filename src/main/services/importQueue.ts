@@ -41,8 +41,9 @@ export class ImportQueue {
 
     for (const file of files) {
       const fileName = basename(file)
-      if (extname(fileName).toLowerCase() !== '.txt') {
-        summary.warnings.push(`${fileName}：只支持 TXT 文件`)
+      const extension = extname(fileName).toLowerCase()
+      if (extension !== '.txt' && extension !== '.epub') {
+        summary.warnings.push(`${fileName}：只支持 TXT / EPUB 文件`)
         continue
       }
 

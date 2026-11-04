@@ -416,6 +416,7 @@ function createWindow(
       kind === 'transparent' ? '#00000000' : kind === 'code' ? '#121314' : '#f5f3ee',
     opacity: settings.slacking.opacity,
     alwaysOnTop: settings.slacking.alwaysOnTop,
+    ...(app.isPackaged ? {} : { icon: join(__dirname, '../../build/icon.png') }),
     minWidth: minWindowSize(kind).width,
     minHeight: minWindowSize(kind).height,
     webPreferences: {
@@ -626,6 +627,11 @@ if (hasSingleInstanceLock) {
       }
     })
     ipcMain.handle('library:list', () => library.list())
+    ipcMain.handle('book:cover', async (_event, id: unknown) => {
+      if (typeof id !== 'string') return null
+      const cover = await books.readCover(id)
+      return cover ? `data:${cover.mime};base64,${cover.data.toString('base64')}` : null
+    })
     ipcMain.handle('library:find-merges', (_event, ids: unknown) => {
       const safeIds = Array.isArray(ids)
         ? ids.filter((id): id is string => typeof id === 'string')
@@ -636,7 +642,7 @@ if (hasSingleInstanceLock) {
       const win = BrowserWindow.fromWebContents(event.sender)
       const options: OpenDialogOptions = {
         properties: ['openFile', 'multiSelections'],
-        filters: [{ name: '文本文件', extensions: ['txt'] }]
+        filters: [{ name: '书籍文件', extensions: ['txt', 'epub'] }]
       }
       const selection = win
         ? await dialog.showOpenDialog(win, options)

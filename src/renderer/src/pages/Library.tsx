@@ -630,7 +630,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
                 清洗规则
               </button>
               <button onClick={() => void handleImport()} disabled={busy}>
-                {busy ? '导入中…' : '导入 TXT'}
+                {busy ? '导入中…' : '导入书籍'}
               </button>
               {entries.length > 0 && (
                 <button className="ghost" onClick={enterSelection}>
@@ -693,11 +693,11 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
         </div>
       )}
       {dragging && !dialog && !pendingMerge && !selectionMode && (
-        <div className="drop-overlay">松开鼠标，导入 TXT</div>
+        <div className="drop-overlay">松开鼠标，导入书籍</div>
       )}
 
       {entries.length === 0 ? (
-        <p className="empty">书架还是空的，点击右上角「导入 TXT」开始阅读。</p>
+        <p className="empty">书架还是空的，点击右上角「导入书籍」开始阅读。</p>
       ) : (
         <div className="grid">
           {sorted.map((entry) => (
@@ -783,14 +783,16 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
             >
               标记章节…
             </button>
-            <button
-              onClick={() => {
-                setDialog({ kind: 'encoding', entry: menu.entry })
-                setMenu(null)
-              }}
-            >
-              切换编码…
-            </button>
+            {menu.entry.format !== 'epub' && (
+              <button
+                onClick={() => {
+                  setDialog({ kind: 'encoding', entry: menu.entry })
+                  setMenu(null)
+                }}
+              >
+                切换编码…
+              </button>
+            )}
             <button
               className="danger"
               onClick={() => {
@@ -983,7 +985,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
         >
           <p>确定删除《{dialog.entry.title}》吗？</p>
           <p className="modal-note">
-            会移除书架记录和软件内的书籍数据；你导入的原始 TXT 文件不会被删除。
+            会移除书架记录和软件内的书籍数据；你导入的原始文件不会被删除。
           </p>
         </Modal>
       )}
@@ -1085,7 +1087,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
             {selectedEntries.length > 3 ? ' 等' : ''}。
           </p>
           <p className="modal-note">
-            会移除书架记录、软件内的书籍数据和备份；你导入的原始 TXT 文件不会被删除。
+            会移除书架记录、软件内的书籍数据和备份；你导入的原始文件不会被删除。
           </p>
         </Modal>
       )}

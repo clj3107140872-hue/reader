@@ -1,5 +1,5 @@
 import { isChapterTitleLine } from './chapters'
-import type { BookMeta, CleanedChapter } from './model'
+import type { BookFormat, BookMeta, CleanedChapter } from './model'
 import { buildChapterMetas } from './pipeline'
 
 export interface BookDocumentsInput {
@@ -12,6 +12,9 @@ export interface BookDocumentsInput {
   sourceText?: string
   /** Manual chapter markers to persist; omit for auto-split books. */
   chapterStarts?: number[]
+  format?: BookFormat
+  author?: string
+  cover?: { mime: string }
 }
 
 export interface BookDocuments {
@@ -33,6 +36,9 @@ export function buildBookDocuments(input: BookDocumentsInput): BookDocuments {
       title: input.title,
       encoding: input.encoding,
       chapters: buildChapterMetas(chapters),
+      ...(input.format ? { format: input.format } : {}),
+      ...(input.author ? { author: input.author } : {}),
+      ...(input.cover ? { cover: input.cover } : {}),
       ...(input.chapterStarts ? { chapterStarts: input.chapterStarts } : {}),
       createdAt: input.createdAt
     },

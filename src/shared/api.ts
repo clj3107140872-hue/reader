@@ -211,6 +211,8 @@ export interface BackdropTone {
 export interface ReaderApi {
   ping(): Promise<string>
   libraryList(): Promise<LibraryEntry[]>
+  /** Cover image as a data URL, or null when the book has none. */
+  bookCover(id: string): Promise<string | null>
   removeBook(id: string): Promise<void>
   chooseAndImport(): Promise<ImportSummary>
   importPaths(paths: string[]): Promise<ImportSummary>

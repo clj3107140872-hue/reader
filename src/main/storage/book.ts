@@ -21,6 +21,8 @@ export interface BookFiles {
    * `undefined` keeps whatever the book already has.
    */
   original?: Buffer | null
+  /** Cover image bytes, with the same replace/keep/drop rules as `original`. */
+  cover?: Buffer | null
 }
 
 export interface ProgressFile {
@@ -104,6 +106,11 @@ export class BookRepository {
     } else if (files.original === undefined && (await pathExists(join(target, 'original.bin')))) {
       await fs.copyFile(join(target, 'original.bin'), join(tmp, 'original.bin'))
     }
+    if (files.cover !== null && files.cover !== undefined && Buffer.isBuffer(files.cover)) {
+      await fs.writeFile(join(tmp, 'cover.bin'), files.cover)
+    } else if (files.cover === undefined && (await pathExists(join(target, 'cover.bin')))) {
+      await fs.copyFile(join(target, 'cover.bin'), join(tmp, 'cover.bin'))
+    }
 
     let replaced: string | null = null
     if (await pathExists(target)) {
@@ -143,7 +150,7 @@ export class BookRepository {
 
   private async copyBookData(from: string, to: string): Promise<void> {
     await ensureDir(to)
-    for (const name of ['source.txt', 'meta.json', 'progress.json', 'original.bin']) {
+    for (const name of ['source.txt', 'meta.json', 'progress.json', 'original.bin', 'cover.bin']) {
       if (await pathExists(join(from, name))) {
         await fs.copyFile(join(from, name), join(to, name))
       }
@@ -334,6 +341,23 @@ export class BookRepository {
     }
     const original = await this.readOriginal(id)
     return { meta, sourceText: await this.readSource(id), chapters, original }
+  }
+
+  /** Cover bytes plus mime, or null when the book has none. */
+  async readCover(id: string): Promise<{ data: Buffer; mime: string } | null> {
+    assertBookId(id)
+    let meta: BookMeta
+    try {
+      meta = await this.readMeta(id)
+    } catch {
+      return null
+    }
+    if (!meta.cover) return null
+    try {
+      return { data: await fs.readFile(join(this.bookDir(id), 'cover.bin')), mime: meta.cover.mime }
+    } catch {
+      return null
+    }
   }
 
   async readOriginal(id: string): Promise<Buffer | undefined> {

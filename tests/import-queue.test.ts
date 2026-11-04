@@ -55,7 +55,7 @@ describe('ImportQueue', () => {
     )
   })
 
-  it('skips non-txt files and directories with readable warnings', async () => {
+  it('skips unsupported files and directories with readable warnings', async () => {
     const jpg = join(root, '封面.jpg')
     const folder = join(root, '文件夹.txt')
     await writeFile(jpg, 'not a book')
@@ -65,7 +65,7 @@ describe('ImportQueue', () => {
     const summary = await queue.importFiles([jpg, folder])
 
     expect(summary.imported).toBe(0)
-    expect(summary.warnings.join('')).toContain('只支持 TXT 文件')
+    expect(summary.warnings.join('')).toContain('只支持 TXT / EPUB 文件')
     expect(summary.warnings.join('')).toContain('不是文件')
     expect(await library.list()).toEqual([])
   })

@@ -4,6 +4,7 @@ import type { BackdropTone, ReaderApi, SearchProgress } from '../shared/api'
 const api: ReaderApi = {
   ping: () => ipcRenderer.invoke('app:ping'),
   libraryList: () => ipcRenderer.invoke('library:list'),
+  bookCover: (id) => ipcRenderer.invoke('book:cover', id),
   removeBook: (id) => ipcRenderer.invoke('library:remove', id),
   chooseAndImport: () => ipcRenderer.invoke('library:choose-import'),
   importPaths: (paths) => ipcRenderer.invoke('library:import-paths', paths),

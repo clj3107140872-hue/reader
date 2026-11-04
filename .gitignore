@@ -2,6 +2,7 @@ node_modules/
 out/
 dist/
 release-dist/
+build/make-icon.log
 data/
 logs/
 *.log

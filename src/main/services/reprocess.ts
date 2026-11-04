@@ -110,6 +110,7 @@ export class ReprocessService {
     assertBookId(id)
     if (!isSupportedEncoding(encoding)) throw new Error('不支持的编码')
     const book = await this.load(id)
+    if (book.meta.format === 'epub') throw new Error('EPUB 书籍无需切换编码')
     if (!book.original) throw new Error('缺少原始文件数据，无法切换编码')
     const decoded = decodeWithEncoding(book.original, encoding)
     const repair = repairMojibake(decoded.text, decoded.encoding)
@@ -127,6 +128,7 @@ export class ReprocessService {
     if (!isSupportedEncoding(encoding)) throw new Error('不支持的编码')
     return this.library.runExclusive(async () => {
       const book = await this.load(id)
+      if (book.meta.format === 'epub') throw new Error('EPUB 书籍无需切换编码')
       if (!book.original) throw new Error('缺少原始文件数据，无法切换编码')
       const decoded = decodeWithEncoding(book.original, encoding)
       const repair = repairMojibake(decoded.text, decoded.encoding)
@@ -180,7 +182,10 @@ export class ReprocessService {
       createdAt: book.meta.createdAt,
       sourceText: options.sourceText ?? book.sourceText,
       chapterStarts: options.chapterStarts,
-      chapters: cleaned.chapters
+      chapters: cleaned.chapters,
+      ...(book.meta.format ? { format: book.meta.format } : {}),
+      ...(book.meta.author ? { author: book.meta.author } : {}),
+      ...(book.meta.cover ? { cover: book.meta.cover } : {})
     })
     const stats: ImportStats = {
       adLinesRemoved: cleaned.adLinesRemoved,

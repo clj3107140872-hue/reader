@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import type { LibraryEntry } from '../../../core/model'
+import { useBookCover } from '../hooks/useBookCover'
 
 interface BookCardProps {
   entry: LibraryEntry
@@ -27,6 +28,7 @@ export default function BookCard({
   onToggle
 }: BookCardProps) {
   const cardRef = useRef<HTMLElement>(null)
+  const cover = useBookCover(entry.hasCover ? entry.id : null)
 
   const hoverStart = (): void => {
     if (selectable) return
@@ -60,13 +62,16 @@ export default function BookCard({
         onClick={selectable ? onToggle : onOpen}
         aria-pressed={selectable ? selected : undefined}
       >
-        <div className="cover">{coverInitial(entry.title)}</div>
+        <div className="cover">
+          {cover ? <img src={cover} alt="" /> : coverInitial(entry.title)}
+        </div>
         <div className="meta">
           <div className="title" title={selectable ? entry.title : undefined}>
             {entry.title}
           </div>
           <div className="sub">
-            {entry.chapterCount} 章 · {entry.encoding}
+            {entry.format === 'epub' ? 'EPUB' : 'TXT'} · {entry.chapterCount} 章
+            {entry.format === 'epub' ? '' : ` · ${entry.encoding}`}
           </div>
           <div className="sub">
             进度 {entry.progressPercent}% · 广告 {entry.stats.adLinesRemoved} 行 · 重复段{' '}

@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import iconv from 'iconv-lite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { chaptersFromLines } from '../src/core/reprocess'
 import { ImportService } from '../src/main/services/import'
 import { BookRepository } from '../src/main/storage/book'
 import { LibraryRepository } from '../src/main/storage/library'
+import { sampleEpub } from './helpers/epub'
 
 let root = ''
 
@@ -50,6 +52,39 @@ describe('ImportService', () => {
     expect(outcome.entry.stats.adLinesRemoved).toBe(50)
     expect((await library.list())).toHaveLength(1)
     expect((await books.readMeta(outcome.entry.id)).chapters).toHaveLength(50)
+  })
+
+  it('imports an EPUB with its author and cover', async () => {
+    const library = new LibraryRepository(root)
+    const books = new BookRepository(root)
+    const service = new ImportService(library, books)
+
+    const file = join(root, '测试之书.epub')
+    await writeFile(file, sampleEpub())
+
+    const outcome = await service.importFile(file)
+    if ('duplicate' in outcome) throw new Error('unexpected duplicate')
+
+    expect(outcome.entry.format).toBe('epub')
+    expect(outcome.entry.title).toBe('测试之书')
+    expect(outcome.entry.author).toBe('某作者')
+    expect(outcome.entry.hasCover).toBe(true)
+    expect(outcome.entry.chapterCount).toBe(2)
+
+    const meta = await books.readMeta(outcome.entry.id)
+    expect(meta.format).toBe('epub')
+    expect(meta.cover).toEqual({ mime: 'image/jpeg' })
+    expect(meta.chapters.map((chapter) => chapter.title)).toEqual(['第一章 起点', '第二章 终点'])
+
+    const cover = await books.readCover(outcome.entry.id)
+    expect(cover?.mime).toBe('image/jpeg')
+    expect(cover?.data[0]).toBe(0xff)
+
+    const rebuilt = chaptersFromLines(await books.readSource(outcome.entry.id), meta)
+    expect(rebuilt.map((chapter) => chapter.paragraphs)).toEqual([
+      ['你好&世界。', '第一行', '第二行'],
+      ['第二段中文 空格']
+    ])
   })
 
   it('rejects the same file twice by content hash', async () => {
