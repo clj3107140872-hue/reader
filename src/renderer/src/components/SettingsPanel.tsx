@@ -6,6 +6,7 @@ import {
   DISGUISE_OPTIONS,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
+  READING_MODE_OPTIONS,
   THEME_MODE_OPTIONS
 } from '../../../shared/settings'
 import type { SettingsPatch } from '../../../shared/settings'
@@ -64,6 +65,24 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
           ×
         </button>
       </header>
+
+      <section className="setting-group">
+        <h3>阅读</h3>
+        <div className="theme-mode" role="group" aria-label="阅读模式">
+          {READING_MODE_OPTIONS.map((mode) => (
+            <button
+              key={mode.id}
+              className={`theme-mode-option reading-mode-option ${settings.readingMode === mode.id ? 'active' : ''}`}
+              onClick={() => onChange({ readingMode: mode.id })}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+        <p className="setting-hint">
+          卷轴连续滚动；翻页按整页翻动，方向键 / 空格 / 滚轮翻页，章末自动进入下一章。
+        </p>
+      </section>
 
       <section className="setting-group">
         <h3>主题</h3>

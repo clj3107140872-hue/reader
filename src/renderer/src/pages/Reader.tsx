@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import type {
   AppSettings,
@@ -25,6 +25,12 @@ import {
   codeLayout
 } from '../reader/codeLayout'
 import { wheelLineStep } from '../reader/codeWheel'
+import {
+  pageCountFor,
+  pageIndexForOffset,
+  scrollLeftForPage,
+  wheelPageStep
+} from '../reader/pagination'
 import { isNewResizePoint } from '../reader/resizeDrag'
 import {
   charsBefore,
@@ -62,9 +68,14 @@ interface CurrentPosition {
  */
 const WHEEL_DISTANCE_SCALE = 0.64
 
-/** Nearest paragraph inside a chapter section, measured against the probe line. */
+/**
+ * Nearest paragraph inside a chapter section, measured against the probe
+ * point. Pages are columns laid side by side, so paragraphs from other
+ * columns of the same chapter must not win just because their top is closer.
+ */
 function positionInSection(
   section: HTMLElement,
+  x: number,
   y: number
 ): { chapterIndex: number; paragraphIndex: number } {
   const chapterIndex = Number(section.dataset.chapterSection)
@@ -72,9 +83,40 @@ function positionInSection(
     section.querySelectorAll<HTMLElement>('[data-paragraph-index]')
   )
   if (paragraphElements.length === 0) return { chapterIndex, paragraphIndex: 0 }
-  const tops = paragraphElements.map((element) => element.getBoundingClientRect().top)
-  const paragraph = paragraphElements[nearestIndexByTop(tops, y)]
+  const inColumn = paragraphElements.filter((element) => {
+    const rect = element.getBoundingClientRect()
+    return x >= rect.left - 1 && x <= rect.right + 1
+  })
+  const pool = inColumn.length > 0 ? inColumn : paragraphElements
+  const tops = pool.map((element) => element.getBoundingClientRect().top)
+  const paragraph = pool[nearestIndexByTop(tops, y)]
   return { chapterIndex, paragraphIndex: Number(paragraph.dataset.paragraphIndex) }
+}
+
+interface PagedMetrics {
+  /** Width of one page column. */
+  width: number
+  /** Gap between two columns. */
+  gap: number
+  /** Distance from one page to the next. */
+  step: number
+  count: number
+}
+
+/** Measures the column layout of the chapter currently on screen. */
+function measurePaged(scroller: HTMLElement): PagedMetrics | null {
+  const page = scroller.querySelector<HTMLElement>('.reader-page')
+  if (!page) return null
+  const width = page.clientWidth
+  if (!(width > 0)) return null
+  const gap = Number.parseFloat(getComputedStyle(page).columnGap) || 0
+  // Columns overflow the page box; the last section's right edge is the end
+  // of the last column even when the browser's scrollWidth ignores it.
+  const last = page.lastElementChild as HTMLElement | null
+  const pageLeft = page.getBoundingClientRect().left
+  const contentRight = last ? last.getBoundingClientRect().right - pageLeft : 0
+  const total = Math.max(page.scrollWidth, contentRight)
+  return { width, gap, step: width + gap, count: pageCountFor(total, width, gap) }
 }
 
 const DISGUISE_TITLES: Record<Exclude<DisguiseStyle, 'none'>, string> = {
@@ -400,18 +442,18 @@ function NotepadMenubar({
 const ReaderBody = memo(function ReaderBody({ chapters }: { chapters: ChapterView[] }) {
   return (
     <article className="reader-page">
-      {chapters.map((chapter, chapterIndex) => (
+      {chapters.map((chapter) => (
         <section
           key={chapter.meta.index}
           className={`reader-chapter ${chapter.meta.level}`}
-          data-chapter-section={chapterIndex}
+          data-chapter-section={chapter.meta.index}
         >
           <h2 className="chapter-title">{chapter.meta.title}</h2>
           {chapter.paragraphs.map((text, paragraphIndex) => (
             <p
               key={paragraphIndex}
               className="reader-paragraph"
-              data-chapter-index={chapterIndex}
+              data-chapter-index={chapter.meta.index}
               data-paragraph-index={paragraphIndex}
             >
               {text}
@@ -445,6 +487,17 @@ export default function Reader({
   const [disguiseHint, setDisguiseHint] = useState('')
   const style = settings.slacking.disguise
   const disguised = style !== 'none'
+  // The code disguise is an editor and keeps its line scrolling.
+  const paged = settings.readingMode === 'paged' && style !== 'code'
+  const [pageIndex, setPageIndex] = useState(0)
+  const [pageCount, setPageCount] = useState(1)
+  const pagedMetricsRef = useRef<PagedMetrics | null>(null)
+  const anchorRef = useRef<{ chapterIndex: number; paragraphIndex: number }>({
+    chapterIndex: 0,
+    paragraphIndex: 0
+  })
+  const pagedRef = useRef(paged)
+  pagedRef.current = paged
   const layout = codeLayout(editorHeight, commentLines)
   const scrollRef = useRef<HTMLElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -597,6 +650,14 @@ export default function Reader({
 
   const paragraphs = useMemo(() => chapters.map((chapter) => chapter.paragraphs), [chapters])
 
+  // Paged mode lays out one chapter at a time; a whole book in columns would
+  // force the browser to measure every glyph before the first page appears.
+  const visibleChapters = useMemo(() => {
+    if (!paged) return chapters
+    const chapter = chapters[current.chapterIndex]
+    return chapter ? [chapter] : []
+  }, [chapters, current.chapterIndex, paged])
+
   const flush = useCallback((): void => {
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current)
@@ -638,38 +699,218 @@ export default function Reader({
     const paragraph = scroller.querySelector<HTMLElement>(
       `[data-chapter-index="${chapterIndex}"][data-paragraph-index="${paragraphIndex}"]`
     )
-    if (paragraph) {
-      paragraph.scrollIntoView({ block: 'start' })
-      return
-    }
     const section = scroller.querySelector<HTMLElement>(`[data-chapter-section="${chapterIndex}"]`)
-    section?.scrollIntoView({ block: 'start' })
-  }, [])
-
-  const currentPosition = useCallback((): { chapterIndex: number; paragraphIndex: number } | null => {
-    const scroller = scrollRef.current
-    if (!scroller) return null
-    const rect = scroller.getBoundingClientRect()
-    const x = rect.left + rect.width / 2
-    const y = rect.top + Math.min(88, rect.height / 2)
-
-    for (const element of document.elementsFromPoint(x, y)) {
-      const paragraph = element.closest<HTMLElement>('[data-paragraph-index]')
-      if (paragraph) {
-        return {
-          chapterIndex: Number(paragraph.dataset.chapterIndex),
-          paragraphIndex: Number(paragraph.dataset.paragraphIndex)
-        }
-      }
-      const section = element.closest<HTMLElement>('[data-chapter-section]')
-      if (section) return positionInSection(section, y)
+    const target = paragraph ?? section
+    if (!target) return
+    // Chapters at or above the target may still be sized by the
+    // `content-visibility: auto` estimate, and the scroller clamps scrollTop
+    // against that estimate. Lay them out for the jump; their remembered
+    // sizes keep the position stable once the optimization resumes.
+    const revealed: HTMLElement[] = []
+    for (const chapter of Array.from(
+      scroller.querySelectorAll<HTMLElement>('[data-chapter-section]')
+    )) {
+      if (Number(chapter.dataset.chapterSection) > chapterIndex) break
+      if (getComputedStyle(chapter).contentVisibility !== 'auto') continue
+      chapter.style.contentVisibility = 'visible'
+      revealed.push(chapter)
     }
-
-    const sections = Array.from(scroller.querySelectorAll<HTMLElement>('[data-chapter-section]'))
-    if (sections.length === 0) return { chapterIndex: 0, paragraphIndex: 0 }
-    const tops = sections.map((section) => section.getBoundingClientRect().top)
-    return positionInSection(sections[nearestIndexByTop(tops, y)], y)
+    // Matches the scroll-margin-top on paragraphs and chapter titles.
+    const margin = paragraph ? 64 : 0
+    // Reading the rect commits the layout this jump depends on.
+    const scrollerRect = scroller.getBoundingClientRect()
+    const offset = target.getBoundingClientRect().top - scrollerRect.top + scroller.scrollTop
+    scroller.scrollTop = Math.max(0, offset - margin)
+    const applied = scroller.scrollTop
+    // Let the browser render the revealed chapters once, so their real sizes
+    // replace the estimates before the content-visibility optimization
+    // resumes. Then correct any residual drift, unless the reader has moved
+    // on since.
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        for (const chapter of revealed) chapter.style.removeProperty('content-visibility')
+        if (Math.abs(scroller.scrollTop - applied) > 1) return
+        const drift =
+          target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - margin
+        if (Math.abs(drift) > 1) {
+          scroller.scrollTop = Math.max(0, scroller.scrollTop + drift)
+        }
+      })
+    })
   }, [])
+
+  /**
+   * Shows the page that contains a paragraph. Columns reflow on every size or
+   * typography change, so the page is recomputed from the paragraph's layout
+   * offset instead of being remembered as a number.
+   */
+  const applyPagedAnchor = useCallback(
+    (anchor: { chapterIndex: number; paragraphIndex: number }): void => {
+      const scroller = scrollRef.current
+      if (!scroller) return
+      const page = scroller.querySelector<HTMLElement>('.reader-page')
+      if (!page) return
+      const metrics = measurePaged(scroller)
+      if (!metrics) return
+      pagedMetricsRef.current = metrics
+      setPageCount(metrics.count)
+      const target =
+        scroller.querySelector<HTMLElement>(
+          `[data-chapter-index="${anchor.chapterIndex}"][data-paragraph-index="${anchor.paragraphIndex}"]`
+        ) ?? scroller.querySelector<HTMLElement>(`[data-chapter-section="${anchor.chapterIndex}"]`)
+      const offset = target ? target.getBoundingClientRect().left - page.getBoundingClientRect().left : 0
+      const index = Math.min(
+        metrics.count - 1,
+        pageIndexForOffset(offset, metrics.width, metrics.gap)
+      )
+      scroller.scrollLeft = scrollLeftForPage(index, metrics.width, metrics.gap)
+      setPageIndex(Math.max(0, index))
+    },
+    []
+  )
+
+  /** Chapter and paragraph at the top of the page currently on screen. */
+  const currentPosition = useCallback(
+    (probeY?: number): { chapterIndex: number; paragraphIndex: number } | null => {
+      const scroller = scrollRef.current
+      if (!scroller) return null
+      const rect = scroller.getBoundingClientRect()
+      const x = rect.left + rect.width / 2
+      const y = rect.top + (probeY ?? Math.min(88, rect.height / 2))
+
+      for (const element of document.elementsFromPoint(x, y)) {
+        const paragraph = element.closest<HTMLElement>('[data-paragraph-index]')
+        if (paragraph) {
+          return {
+            chapterIndex: Number(paragraph.dataset.chapterIndex),
+            paragraphIndex: Number(paragraph.dataset.paragraphIndex)
+          }
+        }
+        const section = element.closest<HTMLElement>('[data-chapter-section]')
+        if (section) return positionInSection(section, x, y)
+      }
+
+      const sections = Array.from(scroller.querySelectorAll<HTMLElement>('[data-chapter-section]'))
+      if (sections.length === 0) return { chapterIndex: 0, paragraphIndex: 0 }
+      const tops = sections.map((section) => section.getBoundingClientRect().top)
+      return positionInSection(sections[nearestIndexByTop(tops, y)], x, y)
+    },
+    []
+  )
+
+  /** Reads the page the user just landed on and records it as the anchor. */
+  const syncPagedFromView = useCallback((): void => {
+    if (!book) return
+    const scroller = scrollRef.current
+    const metrics = pagedMetricsRef.current
+    if (!scroller || !metrics) return
+    const index = Math.min(
+      metrics.count - 1,
+      Math.max(0, Math.round(scroller.scrollLeft / metrics.step))
+    )
+    setPageIndex(index)
+    const position = currentPosition(Math.min(24, scroller.clientHeight / 4))
+    if (!position) return
+    const percent = percentAt(book.meta, position.chapterIndex, position.paragraphIndex, paragraphs)
+    const next = { ...position, percent }
+    anchorRef.current = position
+    setCurrent(next)
+    scheduleSave(next)
+  }, [book, currentPosition, paragraphs, scheduleSave])
+
+  /** Flips one page, crossing into the neighbouring chapter at the ends. */
+  const turnPage = useCallback(
+    (delta: number): void => {
+      if (!book) return
+      const scroller = scrollRef.current
+      const metrics = pagedMetricsRef.current
+      if (!scroller || !metrics) return
+      const index = Math.min(
+        metrics.count - 1,
+        Math.max(0, Math.round(scroller.scrollLeft / metrics.step))
+      )
+
+      if (delta > 0 && index >= metrics.count - 1) {
+        const chapterIndex = current.chapterIndex + 1
+        if (chapterIndex >= book.meta.chapters.length) return
+        const next = {
+          chapterIndex,
+          paragraphIndex: 0,
+          percent: percentAt(book.meta, chapterIndex, 0, paragraphs)
+        }
+        anchorRef.current = { chapterIndex, paragraphIndex: 0 }
+        pagedMetricsRef.current = null
+        setCurrent(next)
+        scheduleSave(next)
+        return
+      }
+
+      if (delta < 0 && index <= 0) {
+        const chapterIndex = current.chapterIndex - 1
+        if (chapterIndex < 0) return
+        const paragraphIndex = Math.max(0, (paragraphs[chapterIndex]?.length ?? 1) - 1)
+        const next = {
+          chapterIndex,
+          paragraphIndex,
+          percent: percentAt(book.meta, chapterIndex, paragraphIndex, paragraphs)
+        }
+        anchorRef.current = { chapterIndex, paragraphIndex }
+        pagedMetricsRef.current = null
+        setCurrent(next)
+        scheduleSave(next)
+        return
+      }
+
+      const nextIndex = Math.min(metrics.count - 1, Math.max(0, index + delta))
+      scroller.scrollLeft = scrollLeftForPage(nextIndex, metrics.width, metrics.gap)
+      syncPagedFromView()
+    },
+    [book, current.chapterIndex, paragraphs, scheduleSave, syncPagedFromView]
+  )
+  // Wheel and keyboard listeners stay mounted across renders; they read the
+  // latest page-turn callback through this ref.
+  const turnPageRef = useRef(turnPage)
+  turnPageRef.current = turnPage
+
+  /**
+   * Jumps to a paragraph in whichever mode is active. Paged mode may have to
+   * render the target chapter first, so it retries across a few frames.
+   */
+  const goToPosition = useCallback(
+    (rawChapterIndex: number, rawParagraphIndex: number): void => {
+      if (!book) return
+      const chapterIndex = Math.min(
+        Math.max(rawChapterIndex, 0),
+        book.meta.chapters.length - 1
+      )
+      const paragraphIndex = Math.min(
+        Math.max(rawParagraphIndex, 0),
+        Math.max(0, (paragraphs[chapterIndex]?.length ?? 1) - 1)
+      )
+      const percent = percentAt(book.meta, chapterIndex, paragraphIndex, paragraphs)
+      const next = { chapterIndex, paragraphIndex, percent }
+      anchorRef.current = { chapterIndex, paragraphIndex }
+      setCurrent(next)
+      scheduleSave(next)
+      if (!paged) {
+        scrollToPosition(chapterIndex, paragraphIndex)
+        return
+      }
+      let attempts = 0
+      const apply = (): void => {
+        if (!pagedRef.current) return
+        const scroller = scrollRef.current
+        const rendered = scroller?.querySelector(`[data-chapter-section="${chapterIndex}"]`)
+        if (!rendered) {
+          if (attempts++ < 8) window.requestAnimationFrame(apply)
+          return
+        }
+        applyPagedAnchor({ chapterIndex, paragraphIndex })
+      }
+      window.requestAnimationFrame(apply)
+    },
+    [book, paged, paragraphs, applyPagedAnchor, scheduleSave, scrollToPosition]
+  )
 
   const handleScroll = useCallback((): void => {
     if (rafRef.current !== 0) return
@@ -680,6 +921,7 @@ export default function Reader({
       if (!position) return
       const percent = percentAt(book.meta, position.chapterIndex, position.paragraphIndex, paragraphs)
       const next = { ...position, percent }
+      anchorRef.current = position
       setCurrent(next)
       scheduleSave(next)
     })
@@ -708,12 +950,50 @@ export default function Reader({
     const paragraphIndex = saved?.paragraphIndex ?? 0
     const percent = percentAt(book.meta, chapterIndex, paragraphIndex, paragraphs)
     const next = { chapterIndex, paragraphIndex, percent }
+    anchorRef.current = { chapterIndex, paragraphIndex }
     setCurrent(next)
     scheduleSave(next)
     window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => scrollToPosition(chapterIndex, paragraphIndex))
+      window.requestAnimationFrame(() => {
+        if (pagedRef.current) goToPosition(chapterIndex, paragraphIndex)
+        else scrollToPosition(chapterIndex, paragraphIndex)
+      })
     })
-  }, [book, chapters.length, paragraphs, scheduleSave, scrollToPosition])
+  }, [book, chapters.length, paragraphs, scheduleSave, scrollToPosition, goToPosition])
+
+  // A page is recomputed whenever the chapter, the mode or the typography
+  // changes. The anchor paragraph keeps the reading spot across the reflow.
+  // Runs before paint so the new chapter never flashes its first page.
+  useLayoutEffect(() => {
+    if (!paged || !book) return
+    applyPagedAnchor(anchorRef.current)
+  }, [paged, book, current.chapterIndex, settings.typography, applyPagedAnchor])
+
+  // Resizing changes how much text fits on a page, so move the view back to
+  // the page that holds the anchor paragraph. The observer fires after layout,
+  // which is exactly when the column layout can be measured.
+  useEffect(() => {
+    if (!paged) return
+    const scroller = scrollRef.current
+    if (!scroller) return
+    const observer = new ResizeObserver(() => applyPagedAnchor(anchorRef.current))
+    observer.observe(scroller)
+    return () => observer.disconnect()
+  }, [paged, book, applyPagedAnchor])
+
+  // Leaving paged mode returns to the continuous layout; bring the reading
+  // spot back into view instead of the top of the first rendered chapter.
+  // A layout effect keeps this ahead of the scroll event the browser fires
+  // while the four chapters replace the single paged one; that event would
+  // otherwise rewrite the anchor before it is read.
+  const previousPagedRef = useRef(paged)
+  useLayoutEffect(() => {
+    const wasPaged = previousPagedRef.current
+    previousPagedRef.current = paged
+    if (!wasPaged || paged || !book) return
+    const anchor = anchorRef.current
+    scrollToPosition(anchor.chapterIndex, anchor.paragraphIndex)
+  }, [paged, book, scrollToPosition])
 
   useEffect(() => {
     return () => flush()
@@ -740,6 +1020,28 @@ export default function Reader({
     // comment column, so scrolling over the code still moves the novel.
     const target = style === 'code' ? editorRef.current : scroller
     if (!scroller || !target) return
+
+    if (paged) {
+      // One wheel gesture turns one page. The cooldown stops trackpad inertia
+      // from flipping several pages after the finger has stopped.
+      let travel = 0
+      let lastTurn = 0
+      const handleWheel = (event: WheelEvent): void => {
+        if (event.ctrlKey || event.shiftKey) return
+        if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
+        event.preventDefault()
+        const now = performance.now()
+        if (now - lastTurn < 300) return
+        const step = wheelPageStep(event.deltaY, event.deltaMode, travel)
+        travel = step.travel
+        if (step.turn === 0) return
+        lastTurn = now
+        turnPageRef.current(step.turn)
+      }
+
+      target.addEventListener('wheel', handleWheel, { passive: false })
+      return () => target.removeEventListener('wheel', handleWheel)
+    }
 
     if (style === 'code') {
       // One wheel notch moves exactly one line; small trackpad deltas
@@ -772,51 +1074,41 @@ export default function Reader({
 
     target.addEventListener('wheel', handleWheel, { passive: false })
     return () => target.removeEventListener('wheel', handleWheel)
-  }, [book, style])
+  }, [book, style, paged])
 
   const seek = (percent: number): void => {
     if (!book) return
     const { chapterIndex, paragraphIndex } = positionForPercent(book.meta, percent, paragraphs)
-    const applied = percentAt(book.meta, chapterIndex, paragraphIndex, paragraphs)
-    const next = { chapterIndex, paragraphIndex, percent: applied }
-    setCurrent(next)
-    scheduleSave(next)
-    scrollToPosition(chapterIndex, paragraphIndex)
+    goToPosition(chapterIndex, paragraphIndex)
   }
 
   const jumpToChapter = useCallback(
     (chapterIndex: number): void => {
-      if (!book) return
-      const index = Math.min(Math.max(chapterIndex, 0), book.meta.chapters.length - 1)
-      const position = { chapterIndex: index, paragraphIndex: 0, percent: 0 }
-      const percent = percentAt(book.meta, index, 0, paragraphs)
-      const next = { ...position, percent }
-      setCurrent(next)
-      scheduleSave(next)
-      scrollToPosition(index, 0)
+      goToPosition(chapterIndex, 0)
       setDrawer(null)
     },
-    [book, paragraphs, scheduleSave, scrollToPosition]
+    [goToPosition]
   )
 
   const jumpToPosition = useCallback(
     (chapterIndex: number, paragraphIndex: number): void => {
-      if (!book) return
-      const index = Math.min(Math.max(chapterIndex, 0), book.meta.chapters.length - 1)
-      const percent = percentAt(book.meta, index, paragraphIndex, paragraphs)
-      const next = { chapterIndex: index, paragraphIndex, percent }
-      setCurrent(next)
-      scheduleSave(next)
-      scrollToPosition(index, paragraphIndex)
-      const target = scrollRef.current?.querySelector<HTMLElement>(
-        `[data-chapter-index="${index}"][data-paragraph-index="${paragraphIndex}"]`
-      )
-      if (target) {
+      goToPosition(chapterIndex, paragraphIndex)
+      // Paged mode may still be rendering the target chapter; retry briefly
+      // before giving up on the search highlight.
+      const flash = (tries: number): void => {
+        const target = scrollRef.current?.querySelector<HTMLElement>(
+          `[data-chapter-index="${chapterIndex}"][data-paragraph-index="${paragraphIndex}"]`
+        )
+        if (!target) {
+          if (tries < 8) window.requestAnimationFrame(() => flash(tries + 1))
+          return
+        }
         target.classList.add('search-flash')
         window.setTimeout(() => target.classList.remove('search-flash'), 2000)
       }
+      window.requestAnimationFrame(() => flash(0))
     },
-    [book, paragraphs, scheduleSave, scrollToPosition]
+    [goToPosition]
   )
 
   const toggleBookmark = useCallback((): void => {
@@ -974,25 +1266,42 @@ export default function Reader({
       switch (event.key) {
         case 'ArrowLeft':
           event.preventDefault()
-          if (style === 'code') scrollByScreen(-1)
+          if (paged) turnPageRef.current(-1)
+          else if (style === 'code') scrollByScreen(-1)
           else jumpToChapter(current.chapterIndex - 1)
           break
         case 'ArrowRight':
           event.preventDefault()
-          if (style === 'code') scrollByScreen(1)
+          if (paged) turnPageRef.current(1)
+          else if (style === 'code') scrollByScreen(1)
           else jumpToChapter(current.chapterIndex + 1)
+          break
+        case 'ArrowUp':
+          if (paged) {
+            event.preventDefault()
+            turnPageRef.current(-1)
+          }
+          break
+        case 'ArrowDown':
+          if (paged) {
+            event.preventDefault()
+            turnPageRef.current(1)
+          }
           break
         case ' ':
           event.preventDefault()
-          scrollByScreen(event.shiftKey ? -1 : 1)
+          if (paged) turnPageRef.current(event.shiftKey ? -1 : 1)
+          else scrollByScreen(event.shiftKey ? -1 : 1)
           break
         case 'PageDown':
           event.preventDefault()
-          scrollByScreen(1)
+          if (paged) turnPageRef.current(1)
+          else scrollByScreen(1)
           break
         case 'PageUp':
           event.preventDefault()
-          scrollByScreen(-1)
+          if (paged) turnPageRef.current(-1)
+          else scrollByScreen(-1)
           break
         default:
           break
@@ -1009,6 +1318,7 @@ export default function Reader({
     drawer,
     jumpToChapter,
     onBack,
+    paged,
     scrollByScreen,
     setDisguiseStyle,
     style,
@@ -1182,11 +1492,12 @@ export default function Reader({
         </div>
       ) : (
         <main
-          className={style === 'transparent' ? 'reader-scroll transparent-scroll' : 'reader-scroll'}
+          className={`reader-scroll${style === 'transparent' ? ' transparent-scroll' : ''}${paged ? ' paged' : ''}`}
           ref={scrollRef}
-          onScroll={handleScroll}
+          onScroll={paged ? undefined : handleScroll}
+          data-reading-mode={paged ? 'paged' : undefined}
         >
-          <ReaderBody chapters={chapters} />
+          <ReaderBody chapters={visibleChapters} />
         </main>
       )}
 
@@ -1207,6 +1518,7 @@ export default function Reader({
           chapterIndex={current.chapterIndex}
           chapterCount={book.meta.chapters.length}
           remainingMinutes={remainingMinutes}
+          page={paged ? { index: pageIndex, count: pageCount } : undefined}
           onSeek={seek}
         />
       )}

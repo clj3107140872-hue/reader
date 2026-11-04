@@ -80,6 +80,8 @@ export interface AdRule {
 
 export type ThemeName = 'light' | 'dark' | 'green' | 'sepia'
 export type ThemeMode = 'day' | 'night' | 'system'
+/** Continuous scrolling, or one chapter laid out into whole pages. */
+export type ReadingMode = 'scroll' | 'paged'
 export type BossKeyAction = 'hide' | 'minimize'
 /** How the reader disguises itself; 'none' turns the disguise off. */
 export type DisguiseStyle = 'none' | 'notepad' | 'transparent' | 'code'
@@ -108,6 +110,7 @@ export interface AppSettings {
   /** Day palette; night mode always renders the dark palette. */
   theme: ThemeName
   themeMode: ThemeMode
+  readingMode: ReadingMode
   slacking: SlackingSettings
   typography: TypographySettings
   cleaning: { enabled: boolean; disabledBuiltinIds: string[] }

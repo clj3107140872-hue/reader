@@ -3,6 +3,8 @@ interface ProgressBarProps {
   chapterIndex: number
   chapterCount: number
   remainingMinutes: number
+  /** Page numbers inside the current chapter; absent in scroll mode. */
+  page?: { index: number; count: number }
   onSeek: (percent: number) => void
 }
 
@@ -11,6 +13,7 @@ export default function ProgressBar({
   chapterIndex,
   chapterCount,
   remainingMinutes,
+  page,
   onSeek
 }: ProgressBarProps) {
   return (
@@ -18,6 +21,11 @@ export default function ProgressBar({
       <span className="progress-chapter">
         第 {Math.min(chapterIndex + 1, chapterCount)} / {chapterCount} 章
       </span>
+      {page && (
+        <span className="progress-pages">
+          本章 {Math.min(page.index + 1, page.count)} / {page.count} 页
+        </span>
+      )}
       <input
         className="progress-range"
         type="range"

@@ -487,12 +487,15 @@ function createWindow(
     if (bookId) {
       url.searchParams.set('bookId', bookId)
       url.searchParams.set('style', disguise)
+      // The reading mode rides along so a swapped window paints the same layout
+      // immediately instead of scrolling for a frame before the settings load.
+      url.searchParams.set('mode', settings.readingMode)
     }
     void win.loadURL(url.toString())
   } else {
     void win.loadFile(
       join(__dirname, '../renderer/index.html'),
-      bookId ? { query: { bookId, style: disguise } } : undefined
+      bookId ? { query: { bookId, style: disguise, mode: settings.readingMode } } : undefined
     )
   }
   return win

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
-import type { AppSettings, DisguiseStyle } from '../../core/model'
+import type { AppSettings, DisguiseStyle, ReadingMode } from '../../core/model'
 import {
   DEFAULT_SETTINGS,
   mergeSettings,
@@ -19,11 +19,12 @@ const initialBookId = initialParams.get('bookId')
 const initialStyle: DisguiseStyle = initialBookId
   ? normalizeDisguiseStyle(initialParams.get('style'))
   : 'none'
+const initialMode: ReadingMode = initialParams.get('mode') === 'paged' ? 'paged' : 'scroll'
 
-function seededSettings(style: DisguiseStyle): AppSettings {
-  if (style === 'none') return DEFAULT_SETTINGS
+function seededSettings(style: DisguiseStyle, mode: ReadingMode): AppSettings {
   return {
     ...DEFAULT_SETTINGS,
+    readingMode: mode,
     slacking: { ...DEFAULT_SETTINGS.slacking, disguise: style }
   }
 }
@@ -48,7 +49,9 @@ export default function App() {
   const [view, setView] = useState<View>(() =>
     initialBookId ? { name: 'reader', bookId: initialBookId } : { name: 'library' }
   )
-  const [settings, setSettings] = useState<AppSettings>(() => seededSettings(initialStyle))
+  const [settings, setSettings] = useState<AppSettings>(() =>
+    seededSettings(initialStyle, initialMode)
+  )
   const [settingsError, setSettingsError] = useState('')
   const systemPrefersDark = useSystemPrefersDark()
   const theme = resolveTheme(settings, systemPrefersDark)

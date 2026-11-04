@@ -91,6 +91,15 @@ describe('normalizeSettings', () => {
     expect(merged.typography.fontSize).toBe(22)
     expect(merged.typography.lineHeight).toBe(DEFAULT_SETTINGS.typography.lineHeight)
   })
+
+  it('defaults to scroll reading and accepts paged', () => {
+    expect(normalizeSettings({}).readingMode).toBe('scroll')
+    expect(normalizeSettings({ readingMode: 'paged' }).readingMode).toBe('paged')
+    expect(normalizeSettings({ readingMode: 'flip' }).readingMode).toBe('scroll')
+    const merged = mergeSettings(DEFAULT_SETTINGS, { readingMode: 'paged' })
+    expect(merged.readingMode).toBe('paged')
+    expect(merged.typography).toEqual(DEFAULT_SETTINGS.typography)
+  })
 })
 
 describe('SettingsRepository', () => {

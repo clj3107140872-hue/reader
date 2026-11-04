@@ -2,6 +2,7 @@ import type {
   AppSettings,
   BossKeyAction,
   DisguiseStyle,
+  ReadingMode,
   ThemeMode,
   ThemeName
 } from '../core/model'
@@ -10,6 +11,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   version: 1,
   theme: 'light',
   themeMode: 'day',
+  readingMode: 'scroll',
   slacking: {
     disguise: 'none',
     opacity: 1,
@@ -39,6 +41,11 @@ export const THEME_MODE_OPTIONS: { id: ThemeMode; label: string }[] = [
   { id: 'day', label: '日间' },
   { id: 'night', label: '夜间' },
   { id: 'system', label: '跟随系统' }
+]
+
+export const READING_MODE_OPTIONS: { id: ReadingMode; label: string }[] = [
+  { id: 'scroll', label: '卷轴' },
+  { id: 'paged', label: '翻页' }
 ]
 
 export const BOSS_KEY_OPTIONS = [
@@ -119,6 +126,7 @@ function clamp(value: unknown, min: number, max: number, fallback: number): numb
 export interface SettingsPatch {
   theme?: ThemeName
   themeMode?: ThemeMode
+  readingMode?: ReadingMode
   slacking?: Partial<AppSettings['slacking']>
   typography?: Partial<AppSettings['typography']>
   cleaning?: Partial<AppSettings['cleaning']>
@@ -138,6 +146,7 @@ export function normalizeSettings(input: unknown): AppSettings {
     version: 1,
     theme,
     themeMode,
+    readingMode: raw.readingMode === 'paged' ? 'paged' : 'scroll',
     slacking: {
       disguise: normalizeDisguiseStyle(slacking.disguise),
       opacity: clamp(slacking.opacity, 0.6, 1, DEFAULT_SETTINGS.slacking.opacity),

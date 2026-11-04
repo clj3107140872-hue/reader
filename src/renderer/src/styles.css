@@ -298,6 +298,7 @@ body[data-slacking='code'] { background: #121314; }
   color: var(--reader-muted);
 }
 .progress-chapter { flex: 0 0 auto; white-space: nowrap; }
+.progress-pages { flex: 0 0 auto; white-space: nowrap; }
 .progress-range { flex: 1 1 auto; accent-color: var(--reader-accent); cursor: pointer; }
 .progress-percent { flex: 0 0 52px; text-align: right; font-variant-numeric: tabular-nums; }
 .progress-remaining { flex: 0 0 auto; white-space: nowrap; color: #8a8a8a; }
@@ -1624,4 +1625,41 @@ body[data-slacking='code'] { background: #121314; }
 :root[data-app-theme='night'] .marker-toolbar input:focus {
   border-color: #8fbf9a;
   outline-color: rgba(143, 191, 154, 0.3);
+}
+
+/* 翻页模式：一章排成若干等宽栏，每栏是一页，横向翻动。
+   栏宽取页面自身宽度（column-width 足够大时只剩一栏），所以只需要设置
+   页眉页脚之外的可用高度，浏览器自己完成断行与分页。 */
+.reader-scroll.paged {
+  overflow: hidden;
+  padding: var(--paged-pad-y, var(--reader-page-padding, 32px))
+    var(--paged-pad-x, var(--reader-page-padding, 32px));
+}
+.reader .reader-scroll.paged .reader-page {
+  height: 100%;
+  max-width: var(--paged-max-width, var(--reader-max-width, 860px));
+  margin: 0 auto;
+  padding: 0;
+  column-width: 100000px;
+  column-gap: calc(var(--paged-gap, var(--reader-page-padding, 32px)) * 2);
+  column-fill: auto;
+}
+/* Off-screen chapters would otherwise get estimated heights and make page
+   breaks drift while the reader turns pages. Paged mode renders one chapter,
+   so laying all of it out is cheap. */
+.reader .reader-scroll.paged .reader-chapter {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+.reader[data-slacking='notepad'] .reader-scroll.paged {
+  --paged-pad-x: 10px;
+  --paged-pad-y: 8px;
+  --paged-max-width: none;
+  --paged-gap: 10px;
+}
+.reader[data-slacking='transparent'] .reader-scroll.paged {
+  --paged-pad-x: 18px;
+  --paged-pad-y: 16px;
+  --paged-max-width: none;
+  --paged-gap: 18px;
 }
