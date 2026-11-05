@@ -249,7 +249,13 @@ body[data-slacking='code'] { background: #121314; }
   border-radius: 6px;
 }
 .reader-warning .ghost:hover { background: var(--reader-hover); }
-.reader-scroll { flex: 1 1 auto; overflow-y: auto; }
+.reader-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  /* The reading window slides by whole chapters; scrollTop is corrected
+     explicitly, so the browser must not also anchor on its own. */
+  overflow-anchor: none;
+}
 .reader-page {
   max-width: var(--reader-max-width, 860px);
   margin: 0 auto;
@@ -259,10 +265,6 @@ body[data-slacking='code'] { background: #121314; }
   font-size: var(--reader-font-size);
   line-height: var(--reader-line-height);
   color: var(--reader-text);
-}
-.reader-chapter {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 600px;
 }
 .chapter-title {
   font-size: 1.25em;
@@ -870,11 +872,8 @@ body[data-slacking='code'] { background: #121314; }
   line-height: 19px;
   color: #8b949e;
 }
-/* Every line must occupy its real 19px box; content-visibility would give
-   off-screen chapters estimated heights and break line snapping. */
-.reader[data-slacking='code'] .reader-chapter {
-  content-visibility: visible;
-}
+/* Every line must occupy its real 19px box, so no estimated chapter heights
+   (which would break line snapping). */
 .reader[data-slacking='code'] .reader-paragraph {
   margin: 0;
   padding: 0;
@@ -1654,10 +1653,6 @@ body[data-slacking='code'] { background: #121314; }
 /* Off-screen chapters would otherwise get estimated heights and make page
    breaks drift while the reader turns pages. Paged mode renders one chapter,
    so laying all of it out is cheap. */
-.reader .reader-scroll.paged .reader-chapter {
-  content-visibility: visible;
-  contain-intrinsic-size: none;
-}
 .reader[data-slacking='notepad'] .reader-scroll.paged {
   --paged-pad-x: 10px;
   --paged-pad-y: 8px;

@@ -10,7 +10,7 @@ import type {
   TypographySettings
 } from '../../../core/model'
 import { splitParagraphs } from '../../../core/paragraphs'
-import { estimateChapterHeight, estimateTextEm } from '../reader/chapterSize'
+import { chapterWindow } from '../reader/chapterWindow'
 import type { OpenBookPayload, WindowResizeEdge } from '../../../shared/api'
 import { DISGUISE_OPTIONS, FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../../shared/settings'
 import type { SettingsPatch } from '../../../shared/settings'
@@ -445,11 +445,9 @@ function NotepadMenubar({
 
 const ReaderBody = memo(function ReaderBody({
   chapters,
-  typography,
   resizing
 }: {
   chapters: ChapterView[]
-  typography: TypographySettings
   resizing: boolean
 }) {
   const articleRef = useRef<HTMLElement | null>(null)
@@ -469,62 +467,6 @@ const ReaderBody = memo(function ReaderBody({
       article.style.removeProperty('width')
     }
   }, [resizing])
-  // Text widths change only when the book changes, so measure them once
-  // instead of on every resize.
-  const textEms = useMemo(
-    () =>
-      chapters.map((chapter) => ({
-        titleEm: estimateTextEm(chapter.meta.title),
-        paragraphEms: chapter.paragraphs.map(estimateTextEm)
-      })),
-    [chapters]
-  )
-
-  // `content-visibility: auto` sizes chapters it has never rendered from
-  // `contain-intrinsic-size`. A flat size for every chapter makes the
-  // scroller's height far too small for a long book, so jumping to a late
-  // chapter would require laying out every chapter before it. Per-chapter
-  // estimates keep the scroll positions usable without that layout.
-  useLayoutEffect(() => {
-    const article = articleRef.current
-    if (!article) return
-    const apply = (): void => {
-      const contentWidth = Math.max(80, article.clientWidth - typography.pagePadding * 2)
-      const metrics = {
-        lineEm: Math.max(4, contentWidth / typography.fontSize),
-        lineHeightPx: typography.lineHeight * typography.fontSize,
-        fontSizePx: typography.fontSize,
-        paragraphGapPx: typography.paragraphSpacing * typography.fontSize
-      }
-      const sections = article.querySelectorAll<HTMLElement>('[data-chapter-section]')
-      sections.forEach((section, index) => {
-        const ems = textEms[index]
-        const chapter = chapters[index]
-        if (!ems || !chapter) return
-        const height = estimateChapterHeight(
-          ems.titleEm,
-          ems.paragraphEms,
-          metrics,
-          chapter.meta.level === 'volume'
-        )
-        section.style.containIntrinsicSize = `auto ${Math.ceil(height)}px`
-      })
-    }
-    apply()
-    let frame = 0
-    const observer = new ResizeObserver(() => {
-      if (frame !== 0) return
-      frame = window.requestAnimationFrame(() => {
-        frame = 0
-        apply()
-      })
-    })
-    observer.observe(article)
-    return () => {
-      if (frame !== 0) window.cancelAnimationFrame(frame)
-      observer.disconnect()
-    }
-  }, [chapters, textEms, typography])
 
   return (
     <article className="reader-page" ref={articleRef}>
@@ -737,13 +679,46 @@ export default function Reader({
 
   const paragraphs = useMemo(() => chapters.map((chapter) => chapter.paragraphs), [chapters])
 
-  // Paged mode lays out one chapter at a time; a whole book in columns would
-  // force the browser to measure every glyph before the first page appears.
+  // Only a small window of chapters lives in the DOM: the previous, current
+  // and next one. A whole book in flow means every resize or font change
+  // reflows tens of thousands of paragraphs, which freezes long books.
+  const windowRange = useMemo(
+    () => chapterWindow(chapters.length, current.chapterIndex),
+    [chapters.length, current.chapterIndex]
+  )
+  const windowStartRef = useRef(windowRange.start)
+  useLayoutEffect(() => {
+    windowStartRef.current = windowRange.start
+  }, [windowRange.start])
+  const pendingAnchorRef = useRef<{ index: number; top: number } | null>(null)
+
+  // Sliding the window by one chapter removes content above the viewport.
+  // Move scrollTop by that amount so the text on screen stays where it is.
+  useLayoutEffect(() => {
+    const pending = pendingAnchorRef.current
+    pendingAnchorRef.current = null
+    const scroller = scrollRef.current
+    if (!pending || !scroller || paged) return
+    const section = scroller.querySelector<HTMLElement>(
+      `[data-chapter-section="${pending.index}"]`
+    )
+    if (!section) return
+    const scrollerRect = scroller.getBoundingClientRect()
+    const top = section.getBoundingClientRect().top - scrollerRect.top + scroller.scrollTop
+    const delta = top - pending.top
+    if (Math.abs(delta) > 0.5) scroller.scrollTop = Math.max(0, scroller.scrollTop + delta)
+  }, [windowRange.start, paged])
+
   const visibleChapters = useMemo(() => {
-    if (!paged) return chapters
-    const chapter = chapters[current.chapterIndex]
-    return chapter ? [chapter] : []
-  }, [chapters, current.chapterIndex, paged])
+    if (!chapters.length) return []
+    // Paged mode lays out one chapter at a time; a whole book in columns
+    // would force the browser to measure every glyph before the first page.
+    if (paged) {
+      const chapter = chapters[current.chapterIndex]
+      return chapter ? [chapter] : []
+    }
+    return chapters.slice(windowRange.start, windowRange.end)
+  }, [chapters, current.chapterIndex, paged, windowRange.start, windowRange.end])
 
   const flush = useCallback((): void => {
     if (timerRef.current !== null) {
@@ -781,34 +756,43 @@ export default function Reader({
   )
 
   const scrollToPosition = useCallback((chapterIndex: number, paragraphIndex: number): void => {
-    const scroller = scrollRef.current
-    if (!scroller) return
-    const section = scroller.querySelector<HTMLElement>(`[data-chapter-section="${chapterIndex}"]`)
-    if (!section) return
-    // A chapter that `content-visibility` has skipped only reports its
-    // placeholder box, and its paragraphs have no usable layout. Aim at the
-    // section estimate first, then align the paragraph once the chapter has
-    // been rendered around the new scroll position.
-    const scrollerRect = scroller.getBoundingClientRect()
-    const offset = section.getBoundingClientRect().top - scrollerRect.top + scroller.scrollTop
-    scroller.scrollTop = Math.max(0, offset)
-    const applied = scroller.scrollTop
-    window.requestAnimationFrame(() => {
+    const attempt = (tries: number): void => {
+      const scroller = scrollRef.current
+      if (!scroller) return
+      const section = scroller.querySelector<HTMLElement>(
+        `[data-chapter-section="${chapterIndex}"]`
+      )
+      if (!section) {
+        // The rendered window re-centres on the target first; retry until its
+        // section is in the DOM.
+        if (tries < 8) window.requestAnimationFrame(() => attempt(tries + 1))
+        return
+      }
+      // Aim at the section first, then align the paragraph once the chapter
+      // has been rendered around the new scroll position (a chapter skipped
+      // by `content-visibility` only reports its placeholder box).
+      const scrollerRect = scroller.getBoundingClientRect()
+      const offset = section.getBoundingClientRect().top - scrollerRect.top + scroller.scrollTop
+      scroller.scrollTop = Math.max(0, offset)
+      const applied = scroller.scrollTop
       window.requestAnimationFrame(() => {
-        if (Math.abs(scroller.scrollTop - applied) > 1) return
-        const paragraph = scroller.querySelector<HTMLElement>(
-          `[data-chapter-index="${chapterIndex}"][data-paragraph-index="${paragraphIndex}"]`
-        )
-        const target = paragraph ?? section
-        // Matches the scroll-margin-top on paragraphs and chapter titles.
-        const margin = paragraph ? 64 : 0
-        const drift =
-          target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - margin
-        if (Math.abs(drift) > 1) {
-          scroller.scrollTop = Math.max(0, scroller.scrollTop + drift)
-        }
+        window.requestAnimationFrame(() => {
+          if (Math.abs(scroller.scrollTop - applied) > 1) return
+          const paragraph = scroller.querySelector<HTMLElement>(
+            `[data-chapter-index="${chapterIndex}"][data-paragraph-index="${paragraphIndex}"]`
+          )
+          const target = paragraph ?? section
+          // Matches the scroll-margin-top on paragraphs and chapter titles.
+          const margin = paragraph ? 64 : 0
+          const drift =
+            target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - margin
+          if (Math.abs(drift) > 1) {
+            scroller.scrollTop = Math.max(0, scroller.scrollTop + drift)
+          }
+        })
       })
-    })
+    }
+    attempt(0)
   }, [])
 
   /**
@@ -993,6 +977,29 @@ export default function Reader({
       if (!position) return
       const percent = percentAt(book.meta, position.chapterIndex, position.paragraphIndex, paragraphs)
       const next = { ...position, percent }
+      // Crossing a chapter boundary slides the rendered window. Remember where
+      // a chapter that stays in the DOM sits, so the effect after the re-render
+      // can keep it under the reader's eyes.
+      const nextStart = pagedRef.current
+        ? windowStartRef.current
+        : chapterWindow(book.meta.chapters.length, position.chapterIndex).start
+      if (nextStart !== windowStartRef.current) {
+        const scroller = scrollRef.current
+        // Anchor on the first chapter present both before and after the slide:
+        // the new window's start when moving forward, the current start when
+        // moving backward (the chapter being prepended is not in the DOM yet).
+        const anchorIndex = Math.max(nextStart, windowStartRef.current)
+        const section = scroller?.querySelector<HTMLElement>(
+          `[data-chapter-section="${anchorIndex}"]`
+        )
+        if (scroller && section) {
+          const scrollerRect = scroller.getBoundingClientRect()
+          pendingAnchorRef.current = {
+            index: anchorIndex,
+            top: section.getBoundingClientRect().top - scrollerRect.top + scroller.scrollTop
+          }
+        }
+      }
       anchorRef.current = position
       setCurrent(next)
       scheduleSave(next)
@@ -1531,7 +1538,7 @@ export default function Reader({
               ref={scrollRef}
               onScroll={handleCommentScroll}
             >
-              <ReaderBody chapters={chapters} typography={settings.typography} resizing={resizing} />
+              <ReaderBody chapters={visibleChapters} resizing={resizing} />
             </main>
             <div
               className="code-band-handle top"
@@ -1569,7 +1576,7 @@ export default function Reader({
           onScroll={paged ? undefined : handleScroll}
           data-reading-mode={paged ? 'paged' : undefined}
         >
-          <ReaderBody chapters={visibleChapters} typography={settings.typography} resizing={resizing} />
+          <ReaderBody chapters={visibleChapters} resizing={resizing} />
         </main>
       )}
 
