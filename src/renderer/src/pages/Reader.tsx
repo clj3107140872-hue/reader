@@ -161,7 +161,7 @@ interface ResizeDrag {
  * forwarding it would make every resize schedule the next one until the app
  * locks up.
  */
-function WindowResizeHandles() {
+function WindowResizeHandles({ onResizeSession }: { onResizeSession: (active: boolean) => void }) {
   const dragRef = useRef<ResizeDrag | null>(null)
 
   const sendPending = (drag: ResizeDrag): void => {
@@ -183,6 +183,7 @@ function WindowResizeHandles() {
     }
     dragRef.current = null
     window.api.windowResizeEnd()
+    onResizeSession(false)
   }
 
   return (
@@ -203,6 +204,7 @@ function WindowResizeHandles() {
               frame: null
             }
             window.api.windowResizeStart(edge, event.screenX, event.screenY)
+            onResizeSession(true)
           }}
           onPointerMove={(event) => {
             const drag = dragRef.current
@@ -443,12 +445,30 @@ function NotepadMenubar({
 
 const ReaderBody = memo(function ReaderBody({
   chapters,
-  typography
+  typography,
+  resizing
 }: {
   chapters: ChapterView[]
   typography: TypographySettings
+  resizing: boolean
 }) {
   const articleRef = useRef<HTMLElement | null>(null)
+
+  // Reflowing every paragraph of a long book on each pointer move while the
+  // window is dragged made the app freeze. Pin the text width for the drag,
+  // then release it once so the book reflows exactly once.
+  useLayoutEffect(() => {
+    const article = articleRef.current
+    if (!article) return
+    if (resizing) {
+      article.style.width = `${article.clientWidth}px`
+    } else {
+      article.style.removeProperty('width')
+    }
+    return () => {
+      article.style.removeProperty('width')
+    }
+  }, [resizing])
   // Text widths change only when the book changes, so measure them once
   // instead of on every resize.
   const textEms = useMemo(
@@ -549,6 +569,7 @@ export default function Reader({
   const [backdropDark, setBackdropDark] = useState(false)
   const [commentLines, setCommentLines] = useState(readCommentLines)
   const [editorHeight, setEditorHeight] = useState(() => window.innerHeight)
+  const [resizing, setResizing] = useState(false)
   const [disguiseMenuOpen, setDisguiseMenuOpen] = useState(false)
   const [disguiseHint, setDisguiseHint] = useState('')
   const style = settings.slacking.disguise
@@ -1479,7 +1500,7 @@ export default function Reader({
 
       {style === 'transparent' && <div className="transparent-drag-strip" />}
 
-      {(style === 'transparent' || style === 'code') && <WindowResizeHandles />}
+      {(style === 'transparent' || style === 'code') && <WindowResizeHandles onResizeSession={setResizing} />}
 
       {book.warnings.length > 0 && !warningHidden && !disguised && (
         <div className="reader-warning" role="status">
@@ -1510,7 +1531,7 @@ export default function Reader({
               ref={scrollRef}
               onScroll={handleCommentScroll}
             >
-              <ReaderBody chapters={chapters} typography={settings.typography} />
+              <ReaderBody chapters={chapters} typography={settings.typography} resizing={resizing} />
             </main>
             <div
               className="code-band-handle top"
@@ -1548,7 +1569,7 @@ export default function Reader({
           onScroll={paged ? undefined : handleScroll}
           data-reading-mode={paged ? 'paged' : undefined}
         >
-          <ReaderBody chapters={visibleChapters} typography={settings.typography} />
+          <ReaderBody chapters={visibleChapters} typography={settings.typography} resizing={resizing} />
         </main>
       )}
 
