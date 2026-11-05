@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   chapterTitleHash,
   cnNumberToInt,
+  isChapterTitleLine,
   parseChapterOrdinal,
   splitAtMarkerLines,
   splitChapters
@@ -25,6 +26,40 @@ describe('splitChapters', () => {
     expect(result.chapters[0].paragraphs).toEqual(['正文第一段。', '他翻到第三章。'])
   })
 
+  it('splits titles that end with exclamation or question marks', () => {
+    const text = [
+      '第506章 铁证如山，大索全城！',
+      '内容一',
+      '第507章 这不会是世尊吧？',
+      '内容二',
+      '第508章 收网…',
+      '内容三'
+    ].join('\n')
+    const result = splitChapters(text)
+    expect(result.chapters.map((c) => c.title)).toEqual([
+      '第506章 铁证如山，大索全城！',
+      '第507章 这不会是世尊吧？',
+      '第508章 收网…'
+    ])
+    expect(result.chapters[1].paragraphs).toEqual(['内容二'])
+  })
+
+  it('drops duplicated headings that only carry an empty-content placeholder', () => {
+    const text = [
+      '第1章 开始',
+      '(内容为空)',
+      '第1章 开始',
+      '正文一',
+      '第2章 继续',
+      '正文二',
+      '第3章 结束',
+      '正文三'
+    ].join('\n')
+    const result = splitChapters(text)
+    expect(result.chapters.map((c) => c.title)).toEqual(['第1章 开始', '第2章 继续', '第3章 结束'])
+    expect(result.chapters[0].paragraphs).toEqual(['正文一'])
+  })
+
   it('treats short text without markers as one chapter', () => {
     const result = splitChapters('只有一段文字，没有任何章节。')
     expect(result.detected).toBe(false)
@@ -45,6 +80,23 @@ describe('splitChapters', () => {
     const result = splitAtMarkerLines(text, [3, 0, 0, 2])
     expect(result.chapters.map((c) => c.title)).toEqual(['第一章 甲', '第二章 乙'])
     expect(result.chapters[0].paragraphs).toEqual(['内容一'])
+  })
+})
+
+describe('chapter title detection', () => {
+  it('accepts web-novel titles ending with sentence punctuation', () => {
+    expect(isChapterTitleLine('第506章 铁证如山，大索全城！')).toEqual({
+      title: '第506章 铁证如山，大索全城！',
+      level: 'chapter'
+    })
+    expect(isChapterTitleLine('第507章 这不会是世尊吧？')).not.toBeNull()
+    expect(isChapterTitleLine('第508章：收网！')).not.toBeNull()
+    expect(isChapterTitleLine('大结局！')).not.toBeNull()
+  })
+
+  it('ignores body sentences that start with a chapter marker', () => {
+    expect(isChapterTitleLine('第一章讲的什么？')).toBeNull()
+    expect(isChapterTitleLine('chapter 3 was good.')).toBeNull()
   })
 })
 

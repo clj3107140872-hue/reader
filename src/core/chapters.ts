@@ -45,16 +45,30 @@ const SPECIAL_RE = /^(序章|楔子|引子|前言|序言|尾声|终章|大结局
 const BRACKET_RE = /^[【\[（(]\s*第[^】\]）)]{1,24}[章节回][^】\]）)]{0,24}[】\]）)]/
 const ENGLISH_RE = /^chapter\s+\d+/i
 
+function endsLikeSentence(title: string): boolean {
+  if (/[。！？…]$/.test(title)) return true
+  return ENGLISH_RE.test(title) && /\.$/.test(title)
+}
+
+/** A real heading separates its marker from the title ("第506章 收网！"). */
+function hasHeadingSeparator(title: string): boolean {
+  if (SPECIAL_RE.test(title) || BRACKET_RE.test(title)) return true
+  return /[章节回卷部集篇][\s:：、，.．·\-—]|^chapter\s+\d+\s*[:：.\-—]/i.test(title)
+}
+
 export function isChapterTitleLine(raw: string): { title: string; level: ChapterLevel } | null {
   const title = raw.trim()
   if (!title || title.length > 40) return null
-  if (/[。！？…]$/.test(title)) return null
   if (/https?:\/\/|www\.|最新章节|请记住本站/.test(title)) return null
-  if (VOLUME_RE.test(title)) return { title, level: 'volume' }
-  if (CHAPTER_RE.test(title) || SPECIAL_RE.test(title) || BRACKET_RE.test(title) || ENGLISH_RE.test(title)) {
-    return { title, level: 'chapter' }
-  }
-  return null
+  const volume = VOLUME_RE.test(title)
+  const chapter =
+    CHAPTER_RE.test(title) || SPECIAL_RE.test(title) || BRACKET_RE.test(title) || ENGLISH_RE.test(title)
+  if (!volume && !chapter) return null
+  // Web novels often end a real heading with "！" / "？" (第506章 大索全城！);
+  // only treat it as a sentence when the marker runs straight into body text
+  // ("第一章讲的什么？") with no separator after the unit.
+  if (endsLikeSentence(title) && !hasHeadingSeparator(title)) return null
+  return { title, level: volume ? 'volume' : 'chapter' }
 }
 
 export function normalizeTitleForHash(title: string): string {
@@ -101,6 +115,15 @@ function buildFromCandidates(lines: string[], candidates: Candidate[]): SplitRes
   return { detected: true, chapters }
 }
 
+const EMPTY_PLACEHOLDER_RE = /^[（(]内容为空[)）]$/
+
+/** Sites sometimes repeat a heading with an "(内容为空)" placeholder body. */
+function isEmptyChapter(chapter: SplittedChapter): boolean {
+  if (chapter.level !== 'chapter') return false
+  if (chapter.paragraphs.length === 0) return true
+  return EMPTY_PLACEHOLDER_RE.test(chapter.paragraphs.join('').trim())
+}
+
 export function splitChapters(text: string): SplitResult {
   const lines = text.split(/\r\n|\r|\n/)
   const candidates: Candidate[] = []
@@ -116,7 +139,9 @@ export function splitChapters(text: string): SplitResult {
       chapters: [{ title: '正文', level: 'chapter', startLine: 0, paragraphs }]
     }
   }
-  return buildFromCandidates(lines, candidates)
+  const result = buildFromCandidates(lines, candidates)
+  const chapters = result.chapters.filter((chapter) => !isEmptyChapter(chapter))
+  return chapters.length > 0 ? { detected: true, chapters } : result
 }
 
 export function splitAtMarkerLines(text: string, markerLines: number[]): SplitResult {
