@@ -5,6 +5,7 @@ import { splitAtMarkerLines, splitChapters } from '../../core/chapters'
 import { BUILTIN_AD_RULES, cleanChapters } from '../../core/cleaning'
 import type { CleaningRunConfig } from '../../core/cleaning'
 import { buildBookDocuments } from '../../core/compose'
+import { removeDuplicateChapters } from '../../core/dedupe'
 import { decodeWithEncoding, isSupportedEncoding } from '../../core/encoding'
 import type { SupportedEncoding } from '../../core/encoding'
 import { repairMojibake } from '../../core/mojibake'
@@ -67,7 +68,9 @@ export class ReprocessService {
         }
       }
       // A fresh automatic split replaces any earlier manual markers.
-      return this.commit(id, book, split.chapters, { reason: 'resplit' })
+      return this.commit(id, book, removeDuplicateChapters(split.chapters).chapters, {
+        reason: 'resplit'
+      })
     })
   }
 
@@ -135,7 +138,10 @@ export class ReprocessService {
       const split = book.meta.chapterStarts
         ? splitAtMarkerLines(repair.text, book.meta.chapterStarts)
         : splitChapters(repair.text)
-      return this.commit(id, book, split.chapters, {
+      const chapters = book.meta.chapterStarts
+        ? split.chapters
+        : removeDuplicateChapters(split.chapters).chapters
+      return this.commit(id, book, chapters, {
         reason: 'encoding',
         encoding,
         chapterStarts: book.meta.chapterStarts,

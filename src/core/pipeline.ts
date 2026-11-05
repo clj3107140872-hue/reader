@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { chapterTitleHash, splitChapters } from './chapters'
 import { BUILTIN_AD_RULES, cleanChapters } from './cleaning'
-import { markDuplicateChapters } from './dedupe'
+import { markDuplicateChapters, removeDuplicateChapters } from './dedupe'
 import { decodeBook } from './encoding'
 import { repairMojibake } from './mojibake'
 import type { AdRule, BookMeta, ChapterMeta, CleanedChapter, ImportStats } from './model'
@@ -64,11 +64,14 @@ export function parseBookFile(
   }
   const adRules = options.adRules ?? [...BUILTIN_AD_RULES, ...(options.userRules ?? [])]
   const cleaned = cleanChapters(split.chapters, adRules, { adCleaning: options.adCleaning })
+  // A single file can still repeat a chapter (concatenated volumes); drop the
+  // redundant copy before it reaches the table of contents.
+  const chapters = removeDuplicateChapters(cleaned.chapters).chapters
 
-  const paragraphCount = cleaned.chapters.reduce((total, chapter) => total + chapter.paragraphs.length, 0)
+  const paragraphCount = chapters.reduce((total, chapter) => total + chapter.paragraphs.length, 0)
   if (paragraphCount === 0) throw new Error('文件没有可阅读的正文')
 
-  const metas = buildChapterMetas(cleaned.chapters)
+  const metas = buildChapterMetas(chapters)
   const title = titleFromFileName(fileName)
   const stats: ImportStats = {
     adLinesRemoved: cleaned.adLinesRemoved,
@@ -88,7 +91,7 @@ export function parseBookFile(
     title,
     encoding: decoded.encoding,
     sourceText: repair.text,
-    chapters: cleaned.chapters,
+    chapters,
     meta,
     stats,
     warnings

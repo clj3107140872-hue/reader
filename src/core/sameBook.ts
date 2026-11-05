@@ -1,4 +1,5 @@
 import { parseChapterOrdinal } from './chapters'
+import { removeDuplicateChapters } from './dedupe'
 import type { BookMeta, CleanedChapter } from './model'
 import { hammingBig, toBig, toHalfWidth } from './text'
 
@@ -149,5 +150,7 @@ export function planMerge(base: MergeSource, incoming: MergeSource): CleanedChap
     }
   }
 
-  return sortMergedChapters(chapters)
+  // Overlapping source volumes often repeat a chapter under the same title
+  // with one copy shortened; keep the fuller copy so the TOC stays clean.
+  return sortMergedChapters(removeDuplicateChapters(chapters).chapters)
 }
