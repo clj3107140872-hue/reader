@@ -6,9 +6,11 @@ import type {
   Bookmark,
   BookProgress,
   DisguiseStyle,
-  ThemeName
+  ThemeName,
+  TypographySettings
 } from '../../../core/model'
 import { splitParagraphs } from '../../../core/paragraphs'
+import { estimateChapterHeight, estimateTextEm } from '../reader/chapterSize'
 import type { OpenBookPayload, WindowResizeEdge } from '../../../shared/api'
 import { DISGUISE_OPTIONS, FONT_SIZE_MAX, FONT_SIZE_MIN } from '../../../shared/settings'
 import type { SettingsPatch } from '../../../shared/settings'
@@ -439,9 +441,73 @@ function NotepadMenubar({
   )
 }
 
-const ReaderBody = memo(function ReaderBody({ chapters }: { chapters: ChapterView[] }) {
+const ReaderBody = memo(function ReaderBody({
+  chapters,
+  typography
+}: {
+  chapters: ChapterView[]
+  typography: TypographySettings
+}) {
+  const articleRef = useRef<HTMLElement | null>(null)
+  // Text widths change only when the book changes, so measure them once
+  // instead of on every resize.
+  const textEms = useMemo(
+    () =>
+      chapters.map((chapter) => ({
+        titleEm: estimateTextEm(chapter.meta.title),
+        paragraphEms: chapter.paragraphs.map(estimateTextEm)
+      })),
+    [chapters]
+  )
+
+  // `content-visibility: auto` sizes chapters it has never rendered from
+  // `contain-intrinsic-size`. A flat size for every chapter makes the
+  // scroller's height far too small for a long book, so jumping to a late
+  // chapter would require laying out every chapter before it. Per-chapter
+  // estimates keep the scroll positions usable without that layout.
+  useLayoutEffect(() => {
+    const article = articleRef.current
+    if (!article) return
+    const apply = (): void => {
+      const contentWidth = Math.max(80, article.clientWidth - typography.pagePadding * 2)
+      const metrics = {
+        lineEm: Math.max(4, contentWidth / typography.fontSize),
+        lineHeightPx: typography.lineHeight * typography.fontSize,
+        fontSizePx: typography.fontSize,
+        paragraphGapPx: typography.paragraphSpacing * typography.fontSize
+      }
+      const sections = article.querySelectorAll<HTMLElement>('[data-chapter-section]')
+      sections.forEach((section, index) => {
+        const ems = textEms[index]
+        const chapter = chapters[index]
+        if (!ems || !chapter) return
+        const height = estimateChapterHeight(
+          ems.titleEm,
+          ems.paragraphEms,
+          metrics,
+          chapter.meta.level === 'volume'
+        )
+        section.style.containIntrinsicSize = `auto ${Math.ceil(height)}px`
+      })
+    }
+    apply()
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      if (frame !== 0) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        apply()
+      })
+    })
+    observer.observe(article)
+    return () => {
+      if (frame !== 0) window.cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [chapters, textEms, typography])
+
   return (
-    <article className="reader-page">
+    <article className="reader-page" ref={articleRef}>
       {chapters.map((chapter) => (
         <section
           key={chapter.meta.index}
@@ -696,40 +762,25 @@ export default function Reader({
   const scrollToPosition = useCallback((chapterIndex: number, paragraphIndex: number): void => {
     const scroller = scrollRef.current
     if (!scroller) return
-    const paragraph = scroller.querySelector<HTMLElement>(
-      `[data-chapter-index="${chapterIndex}"][data-paragraph-index="${paragraphIndex}"]`
-    )
     const section = scroller.querySelector<HTMLElement>(`[data-chapter-section="${chapterIndex}"]`)
-    const target = paragraph ?? section
-    if (!target) return
-    // Chapters at or above the target may still be sized by the
-    // `content-visibility: auto` estimate, and the scroller clamps scrollTop
-    // against that estimate. Lay them out for the jump; their remembered
-    // sizes keep the position stable once the optimization resumes.
-    const revealed: HTMLElement[] = []
-    for (const chapter of Array.from(
-      scroller.querySelectorAll<HTMLElement>('[data-chapter-section]')
-    )) {
-      if (Number(chapter.dataset.chapterSection) > chapterIndex) break
-      if (getComputedStyle(chapter).contentVisibility !== 'auto') continue
-      chapter.style.contentVisibility = 'visible'
-      revealed.push(chapter)
-    }
-    // Matches the scroll-margin-top on paragraphs and chapter titles.
-    const margin = paragraph ? 64 : 0
-    // Reading the rect commits the layout this jump depends on.
+    if (!section) return
+    // A chapter that `content-visibility` has skipped only reports its
+    // placeholder box, and its paragraphs have no usable layout. Aim at the
+    // section estimate first, then align the paragraph once the chapter has
+    // been rendered around the new scroll position.
     const scrollerRect = scroller.getBoundingClientRect()
-    const offset = target.getBoundingClientRect().top - scrollerRect.top + scroller.scrollTop
-    scroller.scrollTop = Math.max(0, offset - margin)
+    const offset = section.getBoundingClientRect().top - scrollerRect.top + scroller.scrollTop
+    scroller.scrollTop = Math.max(0, offset)
     const applied = scroller.scrollTop
-    // Let the browser render the revealed chapters once, so their real sizes
-    // replace the estimates before the content-visibility optimization
-    // resumes. Then correct any residual drift, unless the reader has moved
-    // on since.
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        for (const chapter of revealed) chapter.style.removeProperty('content-visibility')
         if (Math.abs(scroller.scrollTop - applied) > 1) return
+        const paragraph = scroller.querySelector<HTMLElement>(
+          `[data-chapter-index="${chapterIndex}"][data-paragraph-index="${paragraphIndex}"]`
+        )
+        const target = paragraph ?? section
+        // Matches the scroll-margin-top on paragraphs and chapter titles.
+        const margin = paragraph ? 64 : 0
         const drift =
           target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - margin
         if (Math.abs(drift) > 1) {
@@ -1459,7 +1510,7 @@ export default function Reader({
               ref={scrollRef}
               onScroll={handleCommentScroll}
             >
-              <ReaderBody chapters={chapters} />
+              <ReaderBody chapters={chapters} typography={settings.typography} />
             </main>
             <div
               className="code-band-handle top"
@@ -1497,7 +1548,7 @@ export default function Reader({
           onScroll={paged ? undefined : handleScroll}
           data-reading-mode={paged ? 'paged' : undefined}
         >
-          <ReaderBody chapters={visibleChapters} />
+          <ReaderBody chapters={visibleChapters} typography={settings.typography} />
         </main>
       )}
 
