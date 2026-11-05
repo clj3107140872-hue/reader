@@ -1,6 +1,6 @@
 {
   "name": "reader",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "离线 TXT 阅读器",
   "main": "./out/main/index.js",
   "scripts": {
