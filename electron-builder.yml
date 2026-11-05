@@ -11,5 +11,12 @@ win:
   target:
     - target: portable
       arch: x64
+    - target: zip
+      arch: x64
+  # Only ship the locales the reader can actually use: the unpacked payload is
+  # written to %TEMP% on every portable launch, so every megabyte counts.
+  electronLanguages:
+    - zh-CN
+    - en-US
 portable:
   artifactName: ${productName}-${version}-portable.${ext}
