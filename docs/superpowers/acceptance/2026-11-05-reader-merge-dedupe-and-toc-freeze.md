@@ -47,6 +47,10 @@
 
 自动化：36 个测试文件 / 240 条用例全过；`tsc --noEmit` 通过。
 
+## 追加：目录定位当前章节（同日）
+
+用户反馈打开目录总是从头开始，长书要滑很久。`TocDrawer` 挂载时把 `.toc-item.current` 滚到抽屉垂直中心（`scrollTop = item.offsetTop - (drawer.clientHeight - item.offsetHeight) / 2`）。离屏实测：在当前第 1355 章打开目录，`scrollTop = 28320`（最大 31087），当前项与抽屉中心偏移 0 px。
+
 ## 后续（需用户关闭软件后执行）
 
 - 更新 `dist/Reader-win-x64` 的 app 文件（不动其 `data`）。
