@@ -585,6 +585,20 @@ export default function Reader({
     return () => window.removeEventListener('pointerdown', handlePointerDown)
   }, [disguiseMenuOpen])
 
+  // A drawer should not require the × button: clicking the book text (or the
+  // progress bar) closes it. The toolbar is excluded so its buttons can switch
+  // between drawers directly.
+  useEffect(() => {
+    if (drawer === null) return
+    const handlePointerDown = (event: PointerEvent): void => {
+      const target = event.target instanceof Element ? event.target : null
+      if (target?.closest('.reader-drawer, .reader-toolbar')) return
+      setDrawer(null)
+    }
+    window.addEventListener('pointerdown', handlePointerDown)
+    return () => window.removeEventListener('pointerdown', handlePointerDown)
+  }, [drawer])
+
   // The × is deliberately absent, so tell people how to get out every time a
   // disguise opens (including when a window is recreated for another style).
   useEffect(() => {
