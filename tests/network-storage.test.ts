@@ -60,6 +60,20 @@ describe('SourceStore', () => {
     const text = await readFile(join(root, 'sources', 'stats.json'), 'utf8')
     expect(text).toContain('"successes": 1')
   })
+
+  it('serializes concurrent records without losing updates', async () => {
+    const store = new SourceStore(root)
+    const [source] = (await store.importParsed([parsed()]), await store.listStored())
+    await Promise.all(
+      Array.from({ length: 20 }, () => store.record(source.id, 'search', 'success', 10))
+    )
+    await store.flush()
+    const stats = JSON.parse(await readFile(join(root, 'sources', 'stats.json'), 'utf8')) as {
+      bySource: Record<string, { search: { attempts: number; successes: number } }>
+    }
+    expect(stats.bySource[source.id].search.attempts).toBe(20)
+    expect(stats.bySource[source.id].search.successes).toBe(20)
+  })
 })
 
 describe('NetworkBookRepository', () => {
@@ -81,5 +95,10 @@ describe('NetworkBookRepository', () => {
     expect(await repo.listCachedChapters('book-1')).toEqual([0])
     await repo.writeChapter('book-1', 1, '', '')
     expect(await repo.listCachedChapters('book-1')).toEqual([0])
+  })
+
+  it('rejects book ids that could escape the books directory', async () => {
+    const repo = new NetworkBookRepository(root)
+    await expect(repo.writeChapter('../escape', 0, 'a', 'b')).rejects.toThrow('无效的书籍编号')
   })
 })

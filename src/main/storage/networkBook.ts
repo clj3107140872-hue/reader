@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
+import { assertBookId } from '../bookId'
 import type { BookMeta } from '../../core/model'
 import { atomicWriteJson, ensureDir, pathExists, readJson } from './fsUtil'
 
@@ -10,7 +11,10 @@ function fileName(index: number): string {
 export class NetworkBookRepository {
   constructor(private readonly root: string) {}
 
-  private bookDir(id: string): string { return join(this.root, 'books', id) }
+  private bookDir(id: string): string {
+    assertBookId(id)
+    return join(this.root, 'books', id)
+  }
 
   async create(meta: BookMeta): Promise<void> {
     const dir = this.bookDir(meta.id)

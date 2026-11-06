@@ -170,20 +170,22 @@ export class SourceStore {
     ms: number,
     message?: string
   ): Promise<void> {
-    const stats = await this.readStats()
-    const value = (stats.bySource[sourceId] ??= emptySourceStats())
-    const target = value[operation]
-    target.attempts++
-    target.totalMs += Math.max(0, Math.round(ms))
-    if (outcome === 'success') target.successes++
-    else if (outcome === 'empty') target.empties++
-    else target.errors++
-    value.lastUsedAt = new Date().toISOString()
-    if (outcome === 'error' && message) {
-      value.lastError = { operation, message, at: value.lastUsedAt }
-    }
-    const stored = await this.get(sourceId)
-    if (stored) value.score = computeScore(value, stored.compat)
+    await this.mutex.runExclusive(async () => {
+      const stats = await this.readStats()
+      const value = (stats.bySource[sourceId] ??= emptySourceStats())
+      const target = value[operation]
+      target.attempts++
+      target.totalMs += Math.max(0, Math.round(ms))
+      if (outcome === 'success') target.successes++
+      else if (outcome === 'empty') target.empties++
+      else target.errors++
+      value.lastUsedAt = new Date().toISOString()
+      if (outcome === 'error' && message) {
+        value.lastError = { operation, message, at: value.lastUsedAt }
+      }
+      const stored = await this.get(sourceId)
+      if (stored) value.score = computeScore(value, stored.compat)
+    })
     this.scheduleStatsFlush()
   }
 
@@ -191,17 +193,19 @@ export class SourceStore {
     if (this.statsTimer) clearTimeout(this.statsTimer)
     this.statsTimer = setTimeout(() => {
       this.statsTimer = null
-      void this.flush()
+      void this.flush().catch(() => undefined)
     }, 2000)
     this.statsTimer.unref?.()
   }
 
   async flush(): Promise<void> {
-    if (!this.statsCache) return
-    if (this.statsTimer) {
-      clearTimeout(this.statsTimer)
-      this.statsTimer = null
-    }
-    await atomicWriteJson(this.statsFile, this.statsCache)
+    await this.mutex.runExclusive(async () => {
+      if (!this.statsCache) return
+      if (this.statsTimer) {
+        clearTimeout(this.statsTimer)
+        this.statsTimer = null
+      }
+      await atomicWriteJson(this.statsFile, this.statsCache)
+    })
   }
 }
