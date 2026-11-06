@@ -236,6 +236,7 @@ export class NetworkBookService {
         bookUrl: meta.network.bookUrl,
         tocUrl: meta.network.tocUrl
       })
+      const previousCount = meta.chapters.length
       const result = diffToc(meta.chapters, toc.chapters)
       meta.chapters = result.chapters
       meta.network.lastTocAt = new Date().toISOString()
@@ -243,11 +244,14 @@ export class NetworkBookService {
       if (result.lastChapter) meta.network.lastChapter = result.lastChapter
       await this.networkBooks.writeMeta(id, meta)
       const cache = await this.cacheInfo(id, meta)
+      const addedContent = result.chapters
+        .slice(previousCount)
+        .some((chapter) => chapter.level !== 'volume')
       await this.library.update(id, {
         chapterCount: meta.chapters.length,
         networkCache: cache,
         downloadState: downloadState(cache.cached, cache.total),
-        lastUpdateAt: meta.network.lastTocAt
+        ...(addedContent ? { lastUpdateAt: meta.network.lastTocAt } : {})
       })
       return {
         added: result.added,

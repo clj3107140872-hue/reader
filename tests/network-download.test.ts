@@ -66,13 +66,15 @@ async function setup(allowNetwork: () => boolean = () => true) {
 
 describe('NetworkBookService downloads', () => {
   it('appends new toc chapters without dropping cached ones', async () => {
-    const { service, server } = await setup()
+    const { service, server, library } = await setup()
     const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const updatedAt = entry.lastUpdateAt
     await service.readChapter(entry.id, 0)
     const result = await service.updateToc(entry.id)
     expect(result.added).toBe(0)
     expect(result.total).toBe(2)
     expect((await service.networkCacheOf(entry.id)).cached).toBe(1)
+    expect((await library.list())[0].lastUpdateAt).toBe(updatedAt)
   })
 
   it('downloads all uncached chapters and reports progress', async () => {
