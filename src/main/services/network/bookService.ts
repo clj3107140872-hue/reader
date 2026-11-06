@@ -2,6 +2,13 @@ import { createHash, randomUUID } from 'node:crypto'
 import { cleanChapters } from '../../../core/cleaning'
 import type { CleaningRunConfig } from '../../../core/cleaning'
 import { downloadState, networkCacheFor } from '../../../core/booksource/quality'
+import type {
+  DownloadDone,
+  DownloadFailedChapter,
+  DownloadProgress,
+  UpdateTocResult
+} from '../../../core/booksource/model'
+import { diffToc } from '../../../core/booksource/toc'
 import type { BookMeta, ChapterMeta, LibraryEntry } from '../../../core/model'
 import { chapterTitleHash } from '../../../core/chapters'
 import { normalizeBookTitle } from '../../../core/sameBook'
@@ -216,6 +223,124 @@ export class NetworkBookService {
     } finally {
       this.chapterRequests.delete(key)
     }
+  }
+
+  async updateToc(id: string): Promise<UpdateTocResult> {
+    assertBookId(id)
+    this.ensureNetwork()
+    return this.locks.run(`book:${id}`, async () => {
+      const meta = await this.networkBooks.readMeta(id)
+      if (meta.format !== 'network' || !meta.network) throw new Error('这不是网络书')
+      const source = await this.sources.require(meta.network.sourceId)
+      const toc = await this.reader.toc(source, {
+        bookUrl: meta.network.bookUrl,
+        tocUrl: meta.network.tocUrl
+      })
+      const result = diffToc(meta.chapters, toc.chapters)
+      meta.chapters = result.chapters
+      meta.network.lastTocAt = new Date().toISOString()
+      meta.network.lastCheckAt = meta.network.lastTocAt
+      if (result.lastChapter) meta.network.lastChapter = result.lastChapter
+      await this.networkBooks.writeMeta(id, meta)
+      const cache = await this.cacheInfo(id, meta)
+      await this.library.update(id, {
+        chapterCount: meta.chapters.length,
+        networkCache: cache,
+        downloadState: downloadState(cache.cached, cache.total),
+        lastUpdateAt: meta.network.lastTocAt
+      })
+      return {
+        added: result.added,
+        total: meta.chapters.length,
+        warnings: toc.warnings,
+        ...(result.lastChapter ? { lastChapter: result.lastChapter } : {})
+      }
+    })
+  }
+
+  downloadAll(
+    id: string,
+    onProgress: (event: DownloadProgress) => void
+  ): Promise<DownloadDone> {
+    assertBookId(id)
+    this.ensureNetwork()
+    const existing = this.downloadJobs.get(id)
+    if (existing) return existing.done as Promise<DownloadDone>
+    const controller = new AbortController()
+    // 先把任务放进 map，取消请求才能看到它。
+    const done = this.runDownload(id, controller, onProgress).finally(() => {
+      this.downloadJobs.delete(id)
+    })
+    this.downloadJobs.set(id, { controller, done })
+    return done
+  }
+
+  private async runDownload(
+    id: string,
+    controller: AbortController,
+    onProgress: (event: DownloadProgress) => void
+  ): Promise<DownloadDone> {
+    // 下载、更新目录、转本地共用每本书的锁，互斥执行。
+    return this.locks.run(`book:${id}`, async () => {
+      const meta = await this.networkBooks.readMeta(id)
+      if (meta.format !== 'network' || !meta.network) throw new Error('这不是网络书')
+      const pending = meta.chapters.filter(
+        (chapter) => chapter.level !== 'volume' && chapter.url
+      )
+      const cached = new Set(await this.networkBooks.listCachedChapters(id))
+      const todo = pending.filter((chapter) => !cached.has(chapter.index))
+      const failedChapters: DownloadFailedChapter[] = []
+      let done = pending.length - todo.length
+      onProgress({ bookId: id, done, total: pending.length, failed: 0 })
+
+      // bookSemaphore 是服务级 Semaphore(2)，不是每书一个：所有书的章节请求
+      // 合计最多同时跑 2 个，所以这里的 4 个 worker 实际最多同时跑 2 章。
+      const queue = [...todo]
+      const workers = Array.from({ length: Math.min(4, queue.length) }, async () => {
+        while (queue.length > 0) {
+          if (controller.signal.aborted) return
+          const chapter = queue.shift()
+          if (!chapter) return
+          try {
+            await this.readChapter(id, chapter.index)
+            done++
+          } catch (error) {
+            if (controller.signal.aborted) return
+            failedChapters.push({
+              index: chapter.index,
+              title: chapter.title,
+              message: error instanceof Error ? error.message : '下载失败'
+            })
+          } finally {
+            onProgress({ bookId: id, done, total: pending.length, failed: failedChapters.length })
+          }
+        }
+      })
+      await Promise.all(workers)
+
+      const cache = await this.cacheInfo(id, meta)
+      const state = downloadState(cache.cached, cache.total)
+      await this.library.update(id, {
+        networkCache: cache,
+        downloadState: state,
+        ...(state === 'complete' ? { lastUpdateAt: new Date().toISOString() } : {})
+      })
+      if (state === 'complete') {
+        meta.network.lastDownloadAt = new Date().toISOString()
+        await this.networkBooks.writeMeta(id, meta)
+      }
+      return {
+        bookId: id,
+        done,
+        total: pending.length,
+        failedChapters,
+        cancelled: controller.signal.aborted
+      }
+    })
+  }
+
+  cancelDownload(id: string): void {
+    this.cancelBookTasks(id)
   }
 
   async networkCacheOf(id: string): Promise<{ cached: number; total: number }> {
