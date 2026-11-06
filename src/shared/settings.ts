@@ -28,7 +28,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     maxContentWidth: 860
   },
   cleaning: { enabled: true, disabledBuiltinIds: [] },
-  window: { width: 1200, height: 800, maximized: false }
+  window: { width: 1200, height: 800, maximized: false },
+  network: { enabled: true, autoCheckOnOpen: true }
 }
 
 export const FONT_SIZE_MIN = 12
@@ -131,6 +132,7 @@ export interface SettingsPatch {
   typography?: Partial<AppSettings['typography']>
   cleaning?: Partial<AppSettings['cleaning']>
   window?: Partial<AppSettings['window']>
+  network?: Partial<AppSettings['network']>
 }
 
 export function normalizeSettings(input: unknown): AppSettings {
@@ -206,6 +208,16 @@ export function normalizeSettings(input: unknown): AppSettings {
           ? windowState.y
           : undefined,
       maximized: typeof windowState.maximized === 'boolean' ? windowState.maximized : false
+    },
+    network: {
+      enabled:
+        typeof (raw.network as AppSettings['network'] | undefined)?.enabled === 'boolean'
+          ? (raw.network as AppSettings['network']).enabled
+          : DEFAULT_SETTINGS.network.enabled,
+      autoCheckOnOpen:
+        typeof (raw.network as AppSettings['network'] | undefined)?.autoCheckOnOpen === 'boolean'
+          ? (raw.network as AppSettings['network']).autoCheckOnOpen
+          : DEFAULT_SETTINGS.network.autoCheckOnOpen
     }
   }
 }
@@ -217,6 +229,7 @@ export function mergeSettings(base: AppSettings, patch: SettingsPatch): AppSetti
     slacking: { ...base.slacking, ...patch.slacking },
     typography: { ...base.typography, ...patch.typography },
     cleaning: { ...base.cleaning, ...patch.cleaning },
-    window: { ...base.window, ...patch.window }
+    window: { ...base.window, ...patch.window },
+    network: { ...base.network, ...patch.network }
   })
 }

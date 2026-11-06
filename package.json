@@ -24,7 +24,9 @@
   },
   "homepage": "https://github.com/clj3107140872-hue/reader#readme",
   "dependencies": {
-    "iconv-lite": "^0.7.3"
+    "cheerio": "^1.0.0",
+    "iconv-lite": "^0.7.3",
+    "jsonpath-plus": "^10.2.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

@@ -9,9 +9,26 @@ export interface ChapterMeta {
   charCount: number
   simhash: string
   flags: { suspectedDuplicate?: boolean }
+  /** 网络章节地址；本地章节没有该字段。 */
+  url?: string
 }
 
-export type BookFormat = 'txt' | 'epub'
+export type BookFormat = 'txt' | 'epub' | 'network'
+export type DownloadState = 'none' | 'partial' | 'complete'
+
+export interface NetworkBookInfo {
+  sourceId: string
+  /** 用于书源删除后按 URL 重新关联。 */
+  sourceUrl: string
+  /** 快照，书源删除后仍能显示。 */
+  sourceName: string
+  bookUrl: string
+  tocUrl: string
+  lastChapter?: string
+  lastTocAt: string | null
+  lastCheckAt: string | null
+  lastDownloadAt?: string | null
+}
 
 export interface BookMeta {
   version: 1
@@ -26,6 +43,9 @@ export interface BookMeta {
   chapters: ChapterMeta[]
   /** Line numbers the user marked as chapter titles; absent for auto-split books. */
   chapterStarts?: number[]
+  intro?: string
+  kind?: string
+  network?: NetworkBookInfo
   createdAt: string
 }
 
@@ -62,6 +82,14 @@ export interface LibraryEntry {
   chapterCount: number
   progressPercent: number
   stats: ImportStats
+  intro?: string
+  kind?: string
+  /** 网络书当前绑定的书源；来源删除后用于显示「书源已删除」。 */
+  sourceId?: string
+  sourceName?: string
+  networkCache?: { cached: number; total: number }
+  downloadState?: DownloadState
+  lastUpdateAt?: string
 }
 
 export interface BookProgress {
@@ -126,4 +154,8 @@ export interface AppSettings {
   typography: TypographySettings
   cleaning: { enabled: boolean; disabledBuiltinIds: string[] }
   window: { width: number; height: number; x?: number; y?: number; maximized: boolean }
+  network: {
+    enabled: boolean
+    autoCheckOnOpen: boolean
+  }
 }

@@ -11,6 +11,15 @@ import type {
   LibraryEntry
 } from '../core/model'
 import type { SettingsPatch } from './settings'
+import type {
+  DownloadDone,
+  DownloadProgress,
+  ImportSourcesResult,
+  NetworkSearchGroup,
+  NetworkSearchItem,
+  SourceListItem,
+  UpdateTocResult
+} from '../core/booksource/model'
 
 export interface ImportSuspect {
   sourceId: string
@@ -146,11 +155,75 @@ export interface StartupNotice {
 
 export interface OpenBookPayload {
   meta: BookMeta
+  contentMode: 'eager' | 'lazy'
+  /** 本地书：全部章节；网络书：[]。 */
   chapters: string[]
+  /** 网络书：已缓存章节索引；本地书：[]。 */
+  cachedChapters: number[]
   /** User-visible notes about chapters that had to be rebuilt or replaced. */
   warnings: string[]
   progress: BookProgress | null
   bookmarks: Bookmark[]
+}
+
+export type SourceImportRequest =
+  | { kind: 'file'; dryRun?: boolean }
+  | { kind: 'json'; json: string; dryRun?: boolean }
+  | { kind: 'url'; url: string; dryRun?: boolean }
+
+export interface NetworkSearchRequest {
+  requestId: string
+  keyword: string
+  scope: 'quality' | 'all'
+}
+
+export interface NetworkSearchSourceEvent {
+  requestId: string
+  sourceId: string
+  sourceName: string
+  status: 'success' | 'empty' | 'error'
+  count: number
+  ms: number
+  message?: string
+}
+
+export interface NetworkSearchPayload {
+  requestId: string
+  groups: NetworkSearchGroup[]
+  searched: number
+  succeeded: number
+  empty: number
+  failed: number
+  remaining: number
+  scope: 'quality' | 'all'
+}
+
+export interface NetworkSearchDone {
+  requestId: string
+  cancelled: boolean
+  searched: number
+  succeeded: number
+  empty: number
+  failed: number
+  groups: NetworkSearchGroup[]
+}
+
+export interface AddNetworkBookInput {
+  sourceId: string
+  bookUrl: string
+  title?: string
+  author?: string
+}
+
+export interface NetworkChapterPayload {
+  text: string
+  cached: boolean
+}
+
+export interface ConvertToLocalResult {
+  id: string
+  chapterCount: number
+  warnings: string[]
 }
 
 export interface NewBookmark {

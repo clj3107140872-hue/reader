@@ -61,7 +61,15 @@ export class ReaderService {
       }
     }
     const stored = await this.books.readProgress(id)
-    return { meta, chapters, warnings, progress: stored.progress, bookmarks: stored.bookmarks }
+    return {
+      meta,
+      contentMode: 'eager',
+      chapters,
+      cachedChapters: [],
+      warnings,
+      progress: stored.progress,
+      bookmarks: stored.bookmarks
+    }
   }
 
   async saveProgress(id: string, progress: BookProgress): Promise<void> {

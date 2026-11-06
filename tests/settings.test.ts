@@ -100,6 +100,14 @@ describe('normalizeSettings', () => {
     expect(merged.readingMode).toBe('paged')
     expect(merged.typography).toEqual(DEFAULT_SETTINGS.typography)
   })
+
+  it('adds network defaults for old settings and preserves explicit values', () => {
+    const old = normalizeSettings({ theme: 'green' })
+    expect(old.network).toEqual({ enabled: true, autoCheckOnOpen: true })
+
+    const off = normalizeSettings({ network: { enabled: false, autoCheckOnOpen: false } })
+    expect(off.network).toEqual({ enabled: false, autoCheckOnOpen: false })
+  })
 })
 
 describe('SettingsRepository', () => {
