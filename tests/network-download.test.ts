@@ -67,7 +67,7 @@ async function setup(allowNetwork: () => boolean = () => true) {
 describe('NetworkBookService downloads', () => {
   it('appends new toc chapters without dropping cached ones', async () => {
     const { service, server, library } = await setup()
-    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
     const updatedAt = entry.lastUpdateAt
     await service.readChapter(entry.id, 0)
     const result = await service.updateToc(entry.id)
@@ -79,7 +79,7 @@ describe('NetworkBookService downloads', () => {
 
   it('downloads all uncached chapters and reports progress', async () => {
     const { service, server } = await setup()
-    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
     const events: { done: number; total: number }[] = []
     const done = await service.downloadAll(entry.id, (event) => events.push(event))
     expect(done.failedChapters).toEqual([])
@@ -90,7 +90,7 @@ describe('NetworkBookService downloads', () => {
 
   it('cancels a running download and finishes from the cache next time', async () => {
     const { service, server } = await setup()
-    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
     server.delayMs = 100
     const running = service.downloadAll(entry.id, () => {})
     setTimeout(() => service.cancelDownload(entry.id), 20)
@@ -105,7 +105,7 @@ describe('NetworkBookService downloads', () => {
 
   it('marks remaining chapters failed when the source disappears mid-download', async () => {
     const { service, server } = await setup()
-    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
     const running = service.downloadAll(entry.id, () => {})
     // KeyedLocks schedules the download body on a microtask, so the abort lands before any chapter starts.
     service.cancelBookTasks(entry.id, 'source-deleted')
@@ -119,7 +119,7 @@ describe('NetworkBookService downloads', () => {
   it('stops a running toc update when the source is deleted', async () => {
     const { service, server, networkBooks } = await setup()
     const sourceId = (await service.sources.list())[0].id
-    const entry = await service.add({ sourceId, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId, bookUrl: `${server.url}/info` })
     const before = await networkBooks.readMeta(entry.id)
     server.delayMs = 100
     const running = service.updateToc(entry.id)
@@ -131,7 +131,7 @@ describe('NetworkBookService downloads', () => {
 
   it('keeps state partial when some chapters fail', async () => {
     const { service, server } = await setup()
-    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
     server.failNext = true
     const done = await service.downloadAll(entry.id, () => {})
     expect(done.failedChapters.length).toBeGreaterThan(0)
@@ -141,7 +141,7 @@ describe('NetworkBookService downloads', () => {
   it('refuses to update the toc when networking is off', async () => {
     let enabled = true
     const { service, server } = await setup(() => enabled)
-    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
     enabled = false
     await expect(service.updateToc(entry.id)).rejects.toThrow('已关闭联网功能')
   })

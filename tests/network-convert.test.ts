@@ -67,13 +67,13 @@ async function setup(allowNetwork: () => boolean = () => true) {
 describe('NetworkBookService conversion', () => {
   it('refuses conversion before the whole book is downloaded', async () => {
     const { service, server } = await setup()
-    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
     await expect(service.convertToLocal(entry.id)).rejects.toThrow('未下载全本')
   })
 
   it('converts a complete network book to a local book and keeps progress', async () => {
     const { service, server, books, library, networkBooks } = await setup()
-    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
     await service.downloadAll(entry.id, () => {})
     // raw 首行与章节标题相同时，转换后只保留一行标题；raw 里混入的广告行
     // 不能进入清洗后的 charCount。
@@ -110,7 +110,7 @@ describe('NetworkBookService conversion', () => {
 
   it('writes a title line for TOC names the local splitter does not recognize', async () => {
     const { service, server, books, networkBooks } = await setup()
-    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
     await service.downloadAll(entry.id, () => {})
     const networkMeta = await networkBooks.readMeta(entry.id)
     networkMeta.chapters[0].title = '上架感言'
@@ -127,7 +127,7 @@ describe('NetworkBookService conversion', () => {
 
   it('restores the network book when conversion fails after writing starts', async () => {
     const { service, server, library, networkBooks } = await setup()
-    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
     await service.downloadAll(entry.id, () => {})
     const update = vi.spyOn(library, 'update').mockRejectedValueOnce(new Error('boom'))
     await expect(service.convertToLocal(entry.id)).rejects.toThrow('boom')
@@ -141,7 +141,7 @@ describe('NetworkBookService conversion', () => {
 
   it('keeps cached chapters readable after the source is deleted', async () => {
     const { service, server } = await setup()
-    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
     await service.readChapter(entry.id, 0)
     await service.sources.remove((await service.sources.list())[0].id)
     expect((await service.readChapter(entry.id, 0)).text).toContain('正文一')
@@ -151,7 +151,7 @@ describe('NetworkBookService conversion', () => {
   it('relinks a network book when the same source URL is imported again', async () => {
     const { service, server, library } = await setup()
     const sourceId = (await service.sources.list())[0].id
-    const entry = await service.add({ sourceId, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId, bookUrl: `${server.url}/info` })
     const raw = await service.sources.raw(sourceId)
     await service.sources.remove(sourceId)
     expect((await library.list())[0].sourceId).toBe(sourceId)

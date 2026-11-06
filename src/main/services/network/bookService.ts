@@ -18,7 +18,11 @@ import type { BookMeta, ChapterMeta, CleanedChapter, LibraryEntry } from '../../
 import { chapterTitleHash } from '../../../core/chapters'
 import { buildChapterMetas } from '../../../core/pipeline'
 import { normalizeBookTitle } from '../../../core/sameBook'
-import type { AddNetworkBookInput, ConvertToLocalResult } from '../../../shared/api'
+import type {
+  AddNetworkBookInput,
+  AddNetworkBookResult,
+  ConvertToLocalResult
+} from '../../../shared/api'
 import type { BookRepository } from '../../storage/book'
 import type { LibraryRepository } from '../../storage/library'
 import type { NetworkBookRepository } from '../../storage/networkBook'
@@ -100,7 +104,7 @@ export class NetworkBookService {
     Promise<{ text: string; warnings: string[] }>
   >()
   /** 同一个 sourceId + bookUrl 的并发加入复用同一个请求。 */
-  private readonly addRequests = new Map<string, Promise<LibraryEntry>>()
+  private readonly addRequests = new Map<string, Promise<AddNetworkBookResult>>()
   private readonly converting = new Set<string>()
   /** 正在拉取目录请求的 controller，删除/停用书源时按书中止。 */
   private readonly tocControllers = new Map<string, AbortController>()
@@ -182,10 +186,10 @@ export class NetworkBookService {
     return null
   }
 
-  async add(input: AddNetworkBookInput): Promise<LibraryEntry> {
+  async add(input: AddNetworkBookInput): Promise<AddNetworkBookResult> {
     this.ensureNetwork()
     const existing = await this.findShelfBook(input.sourceId, input.bookUrl)
-    if (existing) return existing
+    if (existing) return { entry: existing, warnings: [] }
     const key = `${input.sourceId}|${input.bookUrl}`
     const running = this.addRequests.get(key)
     if (running) return running
@@ -198,8 +202,9 @@ export class NetworkBookService {
     }
   }
 
-  private async addOnce(input: AddNetworkBookInput): Promise<LibraryEntry> {
+  private async addOnce(input: AddNetworkBookInput): Promise<AddNetworkBookResult> {
     const source = await this.sources.require(input.sourceId)
+    const warnings: string[] = []
     const infoStarted = Date.now()
     let info: ParsedBookInfo & { bookUrl: string }
     try {
@@ -215,6 +220,7 @@ export class NetworkBookService {
       const message = userFacingNetworkError(error, source.name)
       console.warn(`[network] 书籍信息获取失败，已用搜索结果补齐（${source.name}）：${message}`)
       await this.recordOperation(input.sourceId, 'info', 'error', infoStarted, message)
+      warnings.push(`书籍信息获取失败，已用搜索结果补齐：${message}`)
       info = {
         title: input.title?.trim() ?? '',
         author: input.author?.trim() ?? '',
@@ -251,6 +257,7 @@ export class NetworkBookService {
       toc.chapters.length > 0 ? 'success' : 'empty',
       tocStarted
     )
+    warnings.push(...toc.warnings)
     const chapters = toc.chapters.map((chapter, index) =>
       chapterFromToc(chapter.title, chapter.url, chapter.level, index)
     )
@@ -318,7 +325,7 @@ export class NetworkBookService {
       lastUpdateAt: now
     }
     await this.library.add(entry)
-    return entry
+    return { entry, warnings }
   }
 
   async readChapter(

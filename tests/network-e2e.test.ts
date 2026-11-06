@@ -110,7 +110,7 @@ describe('network book lifecycle', () => {
     const item = found.groups[0].items[0]
     expect(item.title).toBe('测试书')
 
-    const entry = await service.add({ sourceId: item.sourceId, bookUrl: item.bookUrl })
+    const { entry } = await service.add({ sourceId: item.sourceId, bookUrl: item.bookUrl })
     expect(entry.format).toBe('network')
 
     const opened = await readerService.open(entry.id)

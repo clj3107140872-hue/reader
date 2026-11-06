@@ -81,7 +81,7 @@ async function setup(options: SetupOptions = {}) {
 describe('NetworkBookService', () => {
   it('adds a network book with toc and reads a chapter on demand', async () => {
     const { server, service, library, books } = await setup()
-    const entry = await service.add({
+    const { entry } = await service.add({
       sourceId: (await service.sources.list())[0].id,
       bookUrl: `${server.url}/info`
     })
@@ -102,7 +102,7 @@ describe('NetworkBookService', () => {
 
   it('requests a chapter once for concurrent readers', async () => {
     const { service, server } = await setup()
-    const entry = await service.add({
+    const { entry } = await service.add({
       sourceId: (await service.sources.list())[0].id,
       bookUrl: `${server.url}/info`
     })
@@ -125,7 +125,7 @@ describe('NetworkBookService', () => {
   it('refuses network work when networking is off but still reads cached chapters', async () => {
     let enabled = true
     const { service, server } = await setup({ allowNetwork: () => enabled })
-    const entry = await service.add({
+    const { entry } = await service.add({
       sourceId: (await service.sources.list())[0].id,
       bookUrl: `${server.url}/info`
     })
@@ -137,7 +137,7 @@ describe('NetworkBookService', () => {
 
   it('rejects invalid chapter indexes before reading from disk', async () => {
     const { service, server } = await setup()
-    const entry = await service.add({
+    const { entry } = await service.add({
       sourceId: (await service.sources.list())[0].id,
       bookUrl: `${server.url}/info`
     })
@@ -153,8 +153,8 @@ describe('NetworkBookService', () => {
   it('relinks surviving books when another book meta is corrupt', async () => {
     const { service, server, library, store } = await setup()
     const oldSourceId = (await service.sources.list())[0].id
-    const healthy = await service.add({ sourceId: oldSourceId, bookUrl: `${server.url}/info` })
-    const broken = await service.add({ sourceId: oldSourceId, bookUrl: `${server.url}/info?b=broken` })
+    const { entry: healthy } = await service.add({ sourceId: oldSourceId, bookUrl: `${server.url}/info` })
+    const { entry: broken } = await service.add({ sourceId: oldSourceId, bookUrl: `${server.url}/info?b=broken` })
     await rm(join(root, 'books', broken.id, 'meta.json'))
 
     await service.sources.remove(oldSourceId)
@@ -175,7 +175,7 @@ describe('NetworkBookService', () => {
         '<a class="c" href="/c/1">第一章</a>'
     })
     const sourceId = (await service.sources.list())[0].id
-    const entry = await service.add({ sourceId, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId, bookUrl: `${server.url}/info` })
     expect(entry.chapterCount).toBe(2)
     const before = server.requestCount
     await expect(service.readChapter(entry.id, 0)).resolves.toEqual({ text: '', cached: true })
@@ -201,7 +201,7 @@ describe('NetworkBookService', () => {
     const sourceId = (await service.sources.list())[0].id
     const ids: string[] = []
     for (const id of [1, 2, 3]) {
-      ids.push((await service.add({ sourceId, bookUrl: `${server.url}/info?b=${id}` })).id)
+      ids.push((await service.add({ sourceId, bookUrl: `${server.url}/info?b=${id}` })).entry.id)
     }
     peak = 0
     await Promise.all(ids.map((id) => service.readChapter(id, 0)))
@@ -213,7 +213,7 @@ describe('NetworkBookService', () => {
     const sourceId = (await service.sources.list())[0].id
     // The first request (book info) answers 500; the TOC page then loads.
     server.failNext = true
-    const entry = await service.add({
+    const { entry, warnings } = await service.add({
       sourceId,
       bookUrl: `${server.url}/toc`,
       title: '搜索书名',
@@ -222,6 +222,7 @@ describe('NetworkBookService', () => {
       kind: '玄幻',
       lastChapter: '第二章'
     })
+    expect(warnings.join('')).toContain('书籍信息获取失败，已用搜索结果补齐')
     expect(entry.title).toBe('搜索书名')
     expect(entry.author).toBe('搜索作者')
     expect(entry.intro).toBe('搜索简介')
@@ -255,7 +256,7 @@ describe('NetworkBookService', () => {
       })
     })
     const sourceId = (await service.sources.list())[0].id
-    const entry = await service.add({ sourceId, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId, bookUrl: `${server.url}/info` })
     const chapter = await service.readChapter(entry.id, 0)
     expect(chapter.text).toContain('正文一')
     expect(chapter.warnings?.join('')).toContain('清洗后正文为空')
@@ -271,9 +272,9 @@ describe('NetworkBookService', () => {
   it('deduplicates an add by source and book url without fetching again', async () => {
     const { service, server, library } = await setup()
     const sourceId = (await service.sources.list())[0].id
-    const first = await service.add({ sourceId, bookUrl: `${server.url}/info` })
+    const { entry: first } = await service.add({ sourceId, bookUrl: `${server.url}/info` })
     const before = server.requestCount
-    const second = await service.add({ sourceId, bookUrl: `${server.url}/info` })
+    const { entry: second } = await service.add({ sourceId, bookUrl: `${server.url}/info` })
     expect(second.id).toBe(first.id)
     expect(server.requestCount).toBe(before)
     expect(await library.list()).toHaveLength(1)
@@ -281,7 +282,7 @@ describe('NetworkBookService', () => {
 
   it('records info, toc and content operations and keeps content errors in lastError', async () => {
     const { service, server, store, source } = await setup()
-    const entry = await service.add({ sourceId: source.id, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId: source.id, bookUrl: `${server.url}/info` })
     await service.readChapter(entry.id, 0)
     await store.flush()
     const stats = JSON.parse(
@@ -312,7 +313,7 @@ describe('NetworkBookService', () => {
       }
     })
     const sourceId = (await service.sources.list())[0].id
-    const entry = await service.add({ sourceId, bookUrl: `${server.url}/info` })
+    const { entry } = await service.add({ sourceId, bookUrl: `${server.url}/info` })
     failToc = true
     const message = await service.updateToc(entry.id).catch((error: Error) => error.message)
     expect(message).toContain('《源A》拒绝访问（403）')

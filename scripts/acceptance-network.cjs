@@ -356,10 +356,12 @@ async function main() {
     if (!item) throw new Error(`搜索没有结果：${JSON.stringify(found)}`)
     console.log('PASS 优质书源搜索')
 
-    const entry = await page.evaluate(
+    const added = await page.evaluate(
       `window.api.addNetworkBook(${JSON.stringify({ sourceId: item.sourceId, bookUrl: item.bookUrl })})`
     )
-    if (!entry?.id) throw new Error('加入书架没有返回书籍')
+    const entry = added?.entry
+    if (!entry?.id) throw new Error(`加入书架没有返回书籍：${JSON.stringify(added)}`)
+    if (!Array.isArray(added.warnings)) throw new Error('加入书架没有返回 warnings 列表')
     console.log('PASS 加入书架')
 
     await reload(page)

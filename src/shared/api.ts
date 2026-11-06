@@ -219,6 +219,12 @@ export interface AddNetworkBookInput {
   lastChapter?: string
 }
 
+export interface AddNetworkBookResult {
+  entry: LibraryEntry
+  /** 加入成功但需要提示的降级情况（书信息页失败、目录翻页警告等）。 */
+  warnings: string[]
+}
+
 export interface NetworkChapterPayload {
   text: string
   cached: boolean
@@ -362,7 +368,7 @@ export interface ReaderApi {
 
   searchNetwork(request: NetworkSearchRequest): Promise<NetworkSearchDone>
   cancelNetworkSearch(requestId: string): Promise<void>
-  addNetworkBook(input: AddNetworkBookInput): Promise<LibraryEntry>
+  addNetworkBook(input: AddNetworkBookInput): Promise<AddNetworkBookResult>
   updateToc(id: string): Promise<UpdateTocResult>
   downloadAll(id: string): Promise<DownloadDone>
   cancelDownload(id: string): Promise<void>
