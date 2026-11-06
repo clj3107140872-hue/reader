@@ -133,12 +133,17 @@ export default function App() {
           onBack={() => setView({ name: 'library' })}
         />
       ) : view.name === 'sources' ? (
-        <Sources onBack={() => setView({ name: 'library' })} />
+        <Sources
+          settings={settings}
+          onSettingsChange={updateSettings}
+          onBack={() => setView({ name: 'library' })}
+        />
       ) : view.name === 'network-search' ? (
         <NetworkSearch
           networkEnabled={settings.network.enabled}
           onBack={() => setView({ name: 'library' })}
           onAdded={() => setView({ name: 'library' })}
+          onOpenBook={(bookId) => setView({ name: 'reader', bookId })}
         />
       ) : (
         <Library

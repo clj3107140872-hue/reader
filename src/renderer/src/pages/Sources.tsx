@@ -1,11 +1,22 @@
 import { useEffect, useState } from 'react'
 import type { ImportSourcesResult, SourceListItem } from '../../../core/booksource/model'
+import { selectQualitySources } from '../../../core/booksource/quality'
+import type { AppSettings } from '../../../core/model'
+import type { SettingsPatch } from '../../../shared/settings'
 import Modal from '../components/Modal'
 import SourceImportDialog from '../components/SourceImportDialog'
 import SourceList from '../components/SourceList'
 import { errorText } from '../errors'
 
-export default function Sources({ onBack }: { onBack: () => void }) {
+export default function Sources({
+  settings,
+  onSettingsChange,
+  onBack
+}: {
+  settings: AppSettings
+  onSettingsChange: (patch: SettingsPatch) => void
+  onBack: () => void
+}) {
   const [sources, setSources] = useState<SourceListItem[]>([])
   const [importing, setImporting] = useState(false)
   const [raw, setRaw] = useState<{ source: SourceListItem; json: string } | null>(null)
@@ -13,6 +24,10 @@ export default function Sources({ onBack }: { onBack: () => void }) {
   const [toast, setToast] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const enabledCount = sources.filter((source) => source.enabled).length
+  const qualityCount = selectQualitySources(sources).length
+  const partialCount = sources.filter((source) => source.compat.level === 'partial').length
+  const disabledCount = sources.length - enabledCount
 
   const refresh = async (): Promise<void> => {
     setSources(await window.api.sourceList())
@@ -83,9 +98,37 @@ export default function Sources({ onBack }: { onBack: () => void }) {
         <button className="ghost" onClick={onBack}>← 书架</button>
         <h1>书源</h1>
         <div className="toolbar-actions">
+          {!loading && (
+            <span className="source-summary">
+              共 {sources.length} 个 · 已启用 {enabledCount} · 优质池 {qualityCount} · 部分支持 {partialCount} · 已停用 {disabledCount}
+            </span>
+          )}
           <button onClick={() => setImporting(true)}>导入书源</button>
         </div>
       </header>
+      <section className="source-settings" aria-label="网络设置">
+        <h3>网络设置</h3>
+        <label className="setting-check">
+          <input
+            type="checkbox"
+            checked={settings.network.enabled}
+            onChange={(event) =>
+              onSettingsChange({ network: { enabled: event.target.checked } })
+            }
+          />
+          允许联网
+        </label>
+        <label className="setting-check">
+          <input
+            type="checkbox"
+            checked={settings.network.autoCheckOnOpen}
+            onChange={(event) =>
+              onSettingsChange({ network: { autoCheckOnOpen: event.target.checked } })
+            }
+          />
+          打开网络书时自动检查更新
+        </label>
+      </section>
       {error && <p className="modal-error">{error}</p>}
       {loading ? (
         <p className="empty">加载中…</p>
