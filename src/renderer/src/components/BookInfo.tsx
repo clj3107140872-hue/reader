@@ -22,6 +22,12 @@ export default function BookInfo({
       : files.join('、')
   const epub = entry.format === 'epub'
   const network = entry.format === 'network'
+  const downloadLabel =
+    entry.downloadState === 'complete'
+      ? '已下载全本'
+      : entry.downloadState === 'partial'
+        ? '未下载完'
+        : '未下载'
   return (
     <dl className="info-list">
       <dt>书名</dt>
@@ -47,7 +53,7 @@ export default function BookInfo({
           <dt>缓存</dt>
           <dd>
             {entry.networkCache?.cached ?? 0}/{entry.networkCache?.total ?? 0} 章
-            {entry.downloadState === 'complete' ? ' · 已下载全本' : ' · 未下载完'}
+            {` · ${downloadLabel}`}
           </dd>
         </>
       )}
