@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { startFakeServer } from './helpers/networkServer'
+import type { ParsedSource } from '../src/core/booksource/legado'
 import { SourceStore } from '../src/main/services/network/sourceStore'
 import { SourceService } from '../src/main/services/network/sourceService'
 import { SourceReader } from '../src/main/services/network/sourceReader'
@@ -17,6 +18,20 @@ let root = ''
 let close: (() => Promise<void>) | null = null
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'reader-netbook-')) })
 afterEach(async () => { if (close) await close(); await rm(root, { recursive: true, force: true }) })
+
+function parsedSource(url: string): ParsedSource {
+  return {
+    definition: {
+      bookSourceName: '源A', bookSourceUrl: url, searchUrl: '/s?q={{key}}',
+      ruleSearch: { bookList: '.book', name: '.name', bookUrl: '.name@href' },
+      ruleBookInfo: { name: 'h1', author: '.author', tocUrl: '.toc@href' },
+      ruleToc: { chapterList: '.c', chapterName: '@text', chapterUrl: '@href' },
+      ruleContent: { content: '#content@html' }
+    },
+    name: '源A', url, group: '', searchUrl: '/s?q={{key}}', header: {}, customOrder: 0,
+    compat: { level: 'full', issues: [] }
+  }
+}
 
 async function setup(allowNetwork: () => boolean = () => true) {
   const server = await startFakeServer((req, res) => {
@@ -35,17 +50,7 @@ async function setup(allowNetwork: () => boolean = () => true) {
   })
   close = server.close
   const store = new SourceStore(root)
-  await store.importParsed([{
-    definition: {
-      bookSourceName: '源A', bookSourceUrl: server.url, searchUrl: '/s?q={{key}}',
-      ruleSearch: { bookList: '.book', name: '.name', bookUrl: '.name@href' },
-      ruleBookInfo: { name: 'h1', author: '.author', tocUrl: '.toc@href' },
-      ruleToc: { chapterList: '.c', chapterName: '@text', chapterUrl: '@href' },
-      ruleContent: { content: '#content@html' }
-    },
-    name: '源A', url: server.url, group: '', searchUrl: '/s?q={{key}}', header: {}, customOrder: 0,
-    compat: { level: 'full', issues: [] }
-  }])
+  await store.importParsed([parsedSource(server.url)])
   const library = new LibraryRepository(root)
   const books = new BookRepository(root)
   const networkBooks = new NetworkBookRepository(root)
@@ -56,7 +61,7 @@ async function setup(allowNetwork: () => boolean = () => true) {
     allowNetwork
   })
   const [source] = await sources.list()
-  return { server, service, library, books, networkBooks, source }
+  return { server, service, library, books, networkBooks, store, source }
 }
 
 describe('NetworkBookService', () => {
@@ -114,5 +119,37 @@ describe('NetworkBookService', () => {
     enabled = false
     expect((await service.readChapter(entry.id, 0)).cached).toBe(true)
     await expect(service.readChapter(entry.id, 1)).rejects.toThrow('已关闭联网功能')
+  })
+
+  it('rejects invalid chapter indexes before reading from disk', async () => {
+    const { service, server } = await setup()
+    const entry = await service.add({
+      sourceId: (await service.sources.list())[0].id,
+      bookUrl: `${server.url}/info`
+    })
+    // A traversal-shaped index must not be able to read this file through
+    // chapters/../escape.txt (the repository appends ".txt" to the index).
+    await writeFile(join(root, 'books', entry.id, 'escape.txt'), 'SECRET', 'utf8')
+    await expect(service.readChapter(entry.id, -1)).rejects.toThrow('章节不存在')
+    await expect(
+      service.readChapter(entry.id, '../escape' as unknown as number)
+    ).rejects.toThrow('章节不存在')
+  })
+
+  it('relinks surviving books when another book meta is corrupt', async () => {
+    const { service, server, library, store } = await setup()
+    const oldSourceId = (await service.sources.list())[0].id
+    const healthy = await service.add({ sourceId: oldSourceId, bookUrl: `${server.url}/info` })
+    const broken = await service.add({ sourceId: oldSourceId, bookUrl: `${server.url}/info` })
+    await rm(join(root, 'books', broken.id, 'meta.json'))
+
+    await service.sources.remove(oldSourceId)
+    await store.importParsed([parsedSource(server.url)])
+    const replacement = (await service.sources.list())[0]
+    expect(replacement.id).not.toBe(oldSourceId)
+
+    await expect(service.relinkSources()).resolves.toBeUndefined()
+    const entries = await library.list()
+    expect(entries.find((entry) => entry.id === healthy.id)?.sourceId).toBe(replacement.id)
   })
 })

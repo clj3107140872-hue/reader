@@ -162,6 +162,7 @@ export class NetworkBookService {
 
   async readChapter(id: string, index: number): Promise<{ text: string; cached: boolean }> {
     assertBookId(id)
+    if (!Number.isInteger(index) || index < 0) throw new Error('章节不存在')
     const cached = await this.networkBooks.readChapterText(id, index)
     if (cached) return { text: cached, cached: true }
     this.ensureNetwork()
@@ -243,7 +244,13 @@ export class NetworkBookService {
     const byUrl = new Map(sources.map((source) => [source.url, source]))
     for (const entry of await this.library.list()) {
       if (entry.format !== 'network' || !entry.sourceId) continue
-      const meta = await this.networkBooks.readMeta(entry.id)
+      let meta: BookMeta
+      try {
+        meta = await this.networkBooks.readMeta(entry.id)
+      } catch {
+        // One damaged book must not stop the rest from being relinked.
+        continue
+      }
       if (!meta.network) continue
       if (sources.some((source) => source.id === meta.network!.sourceId)) continue
       const replacement = byUrl.get(meta.network.sourceUrl)
