@@ -213,11 +213,17 @@ export interface AddNetworkBookInput {
   bookUrl: string
   title?: string
   author?: string
+  /** 书籍信息拉取失败时用搜索结果补齐。 */
+  intro?: string
+  kind?: string
+  lastChapter?: string
 }
 
 export interface NetworkChapterPayload {
   text: string
   cached: boolean
+  /** 本章的抓取/清洗提示（截断、清洗后为空等）。 */
+  warnings?: string[]
 }
 
 export interface ConvertToLocalResult {

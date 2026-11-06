@@ -87,6 +87,8 @@ export interface LibraryEntry {
   /** 网络书当前绑定的书源；来源删除后用于显示「书源已删除」。 */
   sourceId?: string
   sourceName?: string
+  /** 搜索结果的原始书籍地址，用于「已在书架」判断与加入查重。 */
+  bookUrl?: string
   networkCache?: { cached: number; total: number }
   downloadState?: DownloadState
   lastUpdateAt?: string

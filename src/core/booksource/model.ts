@@ -78,6 +78,8 @@ export interface NetworkSearchItem {
   qualityScore: number
   starred: boolean
   inShelf: boolean
+  /** 已在书架时对应的书架书 id，供「已在书架」直接打开。 */
+  shelfId?: string
   /** 组内最佳来源排序用的内部字段，不展示。 */
   avgMs?: number
   importedAt?: string
