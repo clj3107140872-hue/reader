@@ -9,7 +9,7 @@ import {
   screen
 } from 'electron'
 import type { MessageBoxOptions, OpenDialogOptions, Rectangle, WebContents } from 'electron'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AppSettings, BookProgress } from '../core/model'
 import type { SupportedEncoding } from '../shared/encodings'
@@ -35,7 +35,7 @@ import { NetworkBookService } from './services/network/bookService'
 import { HttpClient } from './services/network/httpClient'
 import { NetworkSearchService } from './services/network/searchService'
 import { SourceReader } from './services/network/sourceReader'
-import { SourceService } from './services/network/sourceService'
+import { MAX_IMPORT_BYTES, SourceService } from './services/network/sourceService'
 import { SourceStore } from './services/network/sourceStore'
 import { resolveDataDir } from './services/paths'
 import { ReaderService } from './services/reader'
@@ -692,6 +692,9 @@ if (hasSingleInstanceLock) {
       if (selection.canceled || selection.filePaths.length === 0) {
         return { added: 0, updated: 0, rejected: [], warnings: ['已取消'] }
       }
+      // spec 5.1：先看文件大小再读，5 MB 以上的书源文件不读入内存。
+      const info = await stat(selection.filePaths[0])
+      if (info.size > MAX_IMPORT_BYTES) throw new Error('书源文件超过 5 MB，无法导入')
       const text = await readFile(selection.filePaths[0], 'utf8')
       const result = await sourceService.importJson(text, request.dryRun)
       await networkBookService.relinkSources()

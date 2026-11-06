@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   normalizeSourceDefinition,
   parseSourceJson,
-  parseSourceValue
+  parseSourceValue,
+  resolveSourceImportUrl
 } from '../src/core/booksource/legado'
 
 function raw(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -78,5 +79,34 @@ describe('legado source parsing', () => {
     expect(batch.sources[0].compat.level).toBe('full')
     expect(batch.sources[0].warnings?.join('')).toContain('header')
     expect(batch.warnings.join('')).toContain('header')
+  })
+
+  it('honors a source-provided enabled flag and defaults to true', () => {
+    const disabled = normalizeSourceDefinition(raw({ enabled: false }))
+    expect(disabled.ok && disabled.source.enabled).toBe(false)
+    const missing = normalizeSourceDefinition(raw())
+    expect(missing.ok && missing.source.enabled).toBe(true)
+    const notBoolean = normalizeSourceDefinition(raw({ enabled: 'no' }))
+    expect(notBoolean.ok && notBoolean.source.enabled).toBe(true)
+  })
+
+  it('decodes legado share links and rejects private schemes', () => {
+    expect(
+      resolveSourceImportUrl(
+        'legado://import/bookSource?src=https%3A%2F%2Fexample.com%2Fsource.json'
+      )
+    ).toBe('https://example.com/source.json')
+    expect(resolveSourceImportUrl('https://example.com/source.json')).toBe(
+      'https://example.com/source.json'
+    )
+
+    expect(() => resolveSourceImportUrl('file:///etc/passwd')).toThrow(/http/)
+    expect(() =>
+      resolveSourceImportUrl('legado://import/bookSource?src=file%3A%2F%2F%2Fetc%2Fpasswd')
+    ).toThrow(/http/)
+    expect(() => resolveSourceImportUrl('legado://import/other?src=https%3A%2F%2Fx.com'))
+      .toThrow(/分享链接/)
+    expect(() => resolveSourceImportUrl('legado://import/bookSource?src=')).toThrow(/缺少/)
+    expect(() => resolveSourceImportUrl('not a url')).toThrow(/地址无效/)
   })
 })

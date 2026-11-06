@@ -104,7 +104,8 @@ export class SourceStore {
           file.sources.push({
             id: randomUUID(),
             definition: parsed.definition,
-            enabled: true,
+            // 尊重书源自带 enabled（spec 5.1）；更新时保留已存状态。
+            enabled: parsed.enabled ?? true,
             starred: false,
             blacklisted: false,
             compat: parsed.compat,

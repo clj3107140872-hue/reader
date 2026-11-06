@@ -24,6 +24,8 @@ export interface HttpRequest {
   signal?: AbortSignal
   timeoutMs?: number
   retry?: number
+  /** Per-request response cap; defaults to the client-wide cap. */
+  maxBytes?: number
 }
 
 export interface HttpResponse {
@@ -243,6 +245,7 @@ export class HttpClient {
   }
 
   private async requestOnce(request: HttpRequest): Promise<HttpResponse> {
+    const maxBytes = request.maxBytes ?? this.maxBytes
     let current: URL
     try {
       current = new URL(request.url)
@@ -303,7 +306,7 @@ export class HttpClient {
             throw new NetworkError(`HTTP ${response.status}`, 'http', response.status)
           }
           const length = Number(response.headers.get('content-length') ?? 0)
-          if (Number.isFinite(length) && length > this.maxBytes) {
+          if (Number.isFinite(length) && length > maxBytes) {
             throw new NetworkError('响应内容过大', 'too-large')
           }
           const reader = response.body?.getReader()
@@ -314,7 +317,7 @@ export class HttpClient {
               const { done, value } = await reader.read()
               if (done) break
               total += value.byteLength
-              if (total > this.maxBytes) {
+              if (total > maxBytes) {
                 await reader.cancel().catch(() => undefined)
                 throw new NetworkError('响应内容过大', 'too-large')
               }

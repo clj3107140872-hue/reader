@@ -4,10 +4,16 @@ import type {
   StoredSource
 } from '../../../core/booksource/model'
 import { parseHeader, parseSourceJson, parseSourceValue } from '../../../core/booksource/legado'
+import { resolveSourceImportUrl } from '../../../core/booksource/legado'
 import type { ParsedSource } from '../../../core/booksource/legado'
 import type { LibraryRepository } from '../../storage/library'
+import { NetworkError } from './httpClient'
 import type { HttpClient } from './httpClient'
-import type { SourceStore } from './sourceStore'
+import type { OperationOutcome, SourceOperation, SourceStore } from './sourceStore'
+
+/** spec 5.1 / 10.4：单次导入上限 5 MB、500 个书源，链接下载同样 5 MB。 */
+export const MAX_IMPORT_BYTES = 5 * 1024 * 1024
+export const MAX_IMPORT_SOURCES = 500
 
 export class SourceService {
   constructor(
@@ -49,8 +55,20 @@ export class SourceService {
         ? { charset: stored.definition.charset }
         : {}),
       customOrder: Number(stored.definition.customOrder ?? 0),
+      enabled: stored.enabled,
       compat: stored.compat
     }
+  }
+
+  /** 记录一次书源操作结果（spec 7.1）；info 只用于排查，不参与质量分。 */
+  async recordOperation(
+    sourceId: string,
+    operation: SourceOperation,
+    outcome: OperationOutcome,
+    ms: number,
+    message?: string
+  ): Promise<void> {
+    await this.store.record(sourceId, operation, outcome, ms, message)
   }
 
   private async applyImport(
@@ -66,7 +84,13 @@ export class SourceService {
   }
 
   async importJson(text: string, dryRun = false): Promise<ImportSourcesResult> {
+    if (Buffer.byteLength(text, 'utf8') > MAX_IMPORT_BYTES) {
+      throw new Error('书源文件超过 5 MB，无法导入')
+    }
     const batch = parseSourceJson(text)
+    if (batch.sources.length > MAX_IMPORT_SOURCES) {
+      throw new Error('单次最多导入 500 个书源')
+    }
     if (dryRun) {
       return { added: batch.sources.length, updated: 0, rejected: batch.rejected, warnings: batch.warnings }
     }
@@ -74,7 +98,16 @@ export class SourceService {
   }
 
   async importUrl(url: string): Promise<ImportSourcesResult> {
-    const response = await this.http.request({ url })
+    const target = resolveSourceImportUrl(url)
+    let response
+    try {
+      response = await this.http.request({ url: target, maxBytes: MAX_IMPORT_BYTES })
+    } catch (error) {
+      if (error instanceof NetworkError && error.kind === 'too-large') {
+        throw new Error('链接内容超过 5 MB')
+      }
+      throw error
+    }
     return this.importJson(response.text)
   }
 

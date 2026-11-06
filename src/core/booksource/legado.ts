@@ -11,6 +11,8 @@ export interface ParsedSource {
   header: Record<string, string>
   charset?: string
   customOrder: number
+  /** 书源自带 enabled；缺省 true。 */
+  enabled?: boolean
   compat: SourceCompat
   /** 解析时发现、但不影响导入的问题（例如 header 不是合法 JSON）。 */
   warnings?: string[]
@@ -165,6 +167,7 @@ export function normalizeSourceDefinition(
       customOrder: Number.isFinite(Number(definition.customOrder))
         ? Number(definition.customOrder)
         : 0,
+      enabled: typeof definition.enabled === 'boolean' ? definition.enabled : true,
       compat,
       ...(warnings.length > 0 ? { warnings } : {})
     }
@@ -217,4 +220,45 @@ export function parseSourceJson(text: string): ParsedSourceBatch {
     throw new Error('书源 JSON 无法解析')
   }
   return parseSourceValue(input)
+}
+
+function httpUrl(value: string): string | null {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolves an import address to the http(s) JSON URL to download.
+ *
+ * Accepts plain http(s) links and the Legado share form
+ * `legado://import/bookSource?src=<url>` (URL-decoded once). Every other
+ * scheme, including file/data/ftp, is rejected.
+ */
+export function resolveSourceImportUrl(input: string): string {
+  const value = input.trim()
+  const protocol = /^([a-z][a-z0-9+.-]*):/i.exec(value)?.[1]?.toLowerCase()
+  if (!value || !protocol) throw new Error('书源地址无效')
+  const direct = httpUrl(value)
+  if (direct) return direct
+  if (protocol !== 'legado') {
+    throw new Error('只支持 http(s) 链接或 legado:// 分享链接')
+  }
+  let share: URL
+  try {
+    share = new URL(value)
+  } catch {
+    throw new Error('分享链接格式不正确')
+  }
+  if (share.hostname.toLowerCase() !== 'import' || share.pathname.toLowerCase() !== '/booksource') {
+    throw new Error('只支持书源分享链接（legado://import/bookSource）')
+  }
+  const source = share.searchParams.get('src')?.trim()
+  if (!source) throw new Error('分享链接缺少书源地址')
+  const nested = httpUrl(source)
+  if (!nested) throw new Error('分享链接里的地址必须是 http(s)')
+  return nested
 }

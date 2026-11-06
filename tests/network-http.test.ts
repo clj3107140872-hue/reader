@@ -2,6 +2,7 @@ import { gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startFakeServer } from './helpers/networkServer'
 import { HttpClient, NetworkError, isBlockedAddress } from '../src/main/services/network/httpClient'
+import { userFacingNetworkError } from '../src/main/services/network/errors'
 
 process.env.READER_ALLOW_LOCAL_SOURCES = '1'
 
@@ -87,6 +88,39 @@ describe('HttpClient', () => {
     const client = new HttpClient()
     const response = await client.request({ url: `${server.url}/gbk`, charset: 'gbk' })
     expect(response.text).toBe('你好')
+  })
+
+  it('maps http failures to actionable Chinese copy with the source name', () => {
+    const http = (status: number): NetworkError => new NetworkError(`HTTP ${status}`, 'http', status)
+    expect(userFacingNetworkError(http(403), '源A')).toBe(
+      '《源A》拒绝访问（403），可能需要登录或更换书源'
+    )
+    expect(userFacingNetworkError(http(404), '源A')).toBe(
+      '《源A》页面不存在（404），书源可能已失效'
+    )
+    expect(userFacingNetworkError(http(429), '源A')).toBe(
+      '《源A》请求太频繁（429），请稍后再试'
+    )
+    expect(userFacingNetworkError(http(503), '源A')).toBe(
+      '《源A》站点暂时不可用（503），请稍后再试'
+    )
+    expect(userFacingNetworkError(new NetworkError('请求超时', 'timeout'), '源A')).toBe(
+      '连接《源A》超时，请稍后重试或换个书源'
+    )
+    // Already-Chinese, already-actionable errors pass through unchanged.
+    expect(userFacingNetworkError(new NetworkError('不允许访问本地或内网地址', 'blocked'), '源A'))
+      .toBe('不允许访问本地或内网地址')
+  })
+
+  it('caps a single request below the client default', async () => {
+    const server = await startFakeServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end('y'.repeat(2048))
+    })
+    close = server.close
+    const client = new HttpClient()
+    await expect(client.request({ url: `${server.url}/big`, maxBytes: 1024 }))
+      .rejects.toMatchObject({ kind: 'too-large' })
   })
 
   it('stops an oversized body and a gzip bomb by decompressed size', async () => {
