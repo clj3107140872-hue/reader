@@ -58,4 +58,51 @@ describe('booksource rules', () => {
       htmlToParagraphs('<div>第一段<br>第二句</div><script>bad()</script><p>第二段</p><style>x{}</style>')
     ).toEqual(['第一段', '第二句', '第二段'])
   })
+
+  it('replaces only the first match when the rule ends with ###', () => {
+    const doc = { kind: 'html' as const, html: '<span>书书</span>', url: 'https://example.com' }
+    expect(evaluateRule('span@text##书##小###', doc, { baseUrl: 'https://example.com' }).values)
+      .toEqual(['小书'])
+    expect(evaluateRule('span@text##书##小', doc, { baseUrl: 'https://example.com' }).values)
+      .toEqual(['小小'])
+  })
+
+  it('falls back to the next alternative when a matched node is empty', () => {
+    const doc = {
+      kind: 'html' as const,
+      html: '<span></span><a>x</a>',
+      url: 'https://example.com'
+    }
+    expect(evaluateRule('span@text||a@text', doc, { baseUrl: 'https://example.com' }).values)
+      .toEqual(['x'])
+  })
+
+  it('warns and keeps the URL plain when URL options cannot be parsed', () => {
+    const parsed = parseUrlOptions('https://example.com/s,{bad json')
+    expect(parsed.url).toBe('https://example.com/s,{bad json')
+    expect(parsed.warnings).toHaveLength(1)
+  })
+
+  it('keeps chapter URL templates unencoded', () => {
+    const ctx = { baseUrl: 'https://example.com', chapterUrl: 'https://example.com/ch/1?x=1&y=2' }
+    expect(applyTemplate('{{chapter.url}}', ctx, { encode: true }).text)
+      .toBe('https://example.com/ch/1?x=1&y=2')
+  })
+
+  it('supports index syntax before and after the suffix', () => {
+    const doc = {
+      kind: 'html' as const,
+      html: '<a href="/b/1">1</a><a href="/b/2">2</a><a href="/b/3">3</a>',
+      url: 'https://example.com'
+    }
+    expect(evaluateRule('a@href.0', doc, { baseUrl: 'https://example.com' }).values).toEqual([
+      '/b/1'
+    ])
+    expect(evaluateRule('a@href.-1', doc, { baseUrl: 'https://example.com' }).values).toEqual([
+      '/b/3'
+    ])
+    expect(evaluateRule('a.1@href', doc, { baseUrl: 'https://example.com' }).values).toEqual([
+      '/b/2'
+    ])
+  })
 })

@@ -74,7 +74,7 @@ export function applyTemplate(
   options: { encode?: boolean } = {}
 ): { text: string; warnings: string[] } {
   const warnings: string[] = []
-  const URL_VARIABLES = new Set(['baseUrl', 'bookUrl', 'chapterUrl'])
+  const URL_VARIABLES = new Set(['baseUrl', 'bookUrl', 'chapterUrl', 'chapter.url'])
   const output = text.replace(TEMPLATE_RE, (_match, raw: string) => {
     const key = raw.trim()
     const value = variableValue(key, ctx)
@@ -103,6 +103,7 @@ export function findUnsupportedRule(text: string): string | null {
 export function parseUrlOptions(raw: string): ParsedUrlOptions {
   const warnings: string[] = []
   let at = raw.lastIndexOf(',{')
+  const sawOptionsCandidate = at >= 0
   while (at >= 0) {
     const candidate = raw.slice(at + 1)
     try {
@@ -133,6 +134,7 @@ export function parseUrlOptions(raw: string): ParsedUrlOptions {
     }
     at = raw.lastIndexOf(',{', at - 1)
   }
+  if (sawOptionsCandidate) warnings.push('URL options 解析失败，按普通 URL 处理')
   return { url: raw, options: { method: 'GET' }, warnings }
 }
 
@@ -169,27 +171,43 @@ interface SegmentParts {
   onlyFirst: boolean
 }
 
+function extractIndex(value: string): { selector: string; index: number | null } {
+  const match = /\.(-?\d+)$/.exec(value)
+  if (!match) return { selector: value, index: null }
+  return { selector: value.slice(0, match.index), index: Number(match[1]) }
+}
+
 function parseSegment(raw: string): SegmentParts {
   let selector = raw.trim()
+  // The OnlyOne marker belongs to the raw rule: splitting on ## first would
+  // turn the trailing "###" into an extra "#" part and lose the marker.
+  let onlyFirst = false
+  if (selector.endsWith('###')) {
+    onlyFirst = true
+    selector = selector.slice(0, -3)
+  }
   const parts = selector.split('##')
   let pattern: string | undefined
   let replacement: string | undefined
-  let onlyFirst = false
   if (parts.length >= 3) {
     selector = parts[0]
     pattern = parts[1]
     replacement = parts[2] ?? ''
-    if (replacement.endsWith('###')) {
-      onlyFirst = true
-      replacement = replacement.slice(0, -3)
-    }
   }
+  // Legado allows the index before the suffix (a.0@href) or after it (a@href.0).
+  const leading = extractIndex(selector)
+  selector = leading.selector
+  let index = leading.index
   const suffixMatch = SUFFIX_RE.exec(selector)
   const suffix = suffixMatch ? suffixMatch[1].toLowerCase() : 'text'
-  if (suffixMatch) selector = selector.slice(0, suffixMatch.index)
-  const indexMatch = /\.(-?\d+)$/.exec(selector)
-  const index = indexMatch ? Number(indexMatch[1]) : null
-  if (indexMatch) selector = selector.slice(0, indexMatch.index)
+  if (suffixMatch) {
+    selector = selector.slice(0, suffixMatch.index)
+    if (index === null) {
+      const trailing = extractIndex(selector)
+      selector = trailing.selector
+      index = trailing.index
+    }
+  }
   return { selector: selector.trim(), suffix, index, pattern, replacement, onlyFirst }
 }
 
@@ -287,7 +305,7 @@ export function evaluateRule(
       warnings.push(...result.warnings)
       merged.push(...result.values)
     }
-    if (merged.length > 0) return { values: merged, warnings }
+    if (merged.some((value) => value.trim().length > 0)) return { values: merged, warnings }
   }
   return { values: [], warnings }
 }
