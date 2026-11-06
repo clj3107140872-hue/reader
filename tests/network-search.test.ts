@@ -101,6 +101,73 @@ describe('NetworkSearchService', () => {
     expect(done.groups).toHaveLength(0)
   })
 
+  it('marks inShelf by source and book url and exposes the shelf book id', async () => {
+    const makeServer = async (path: string) =>
+      startFakeServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end(
+          `<div class="book"><a class="name" href="${path}">同名书</a><span class="author">作者</span></div>`
+        )
+      })
+    const first = await makeServer('/a-book')
+    const second = await makeServer('/b-book')
+    close = async () => {
+      await first.close()
+      await second.close()
+    }
+    const parsed = (url: string) => ({
+      definition: {
+        bookSourceName: url === first.url ? '源A' : '源B',
+        bookSourceUrl: url,
+        searchUrl: '/s?q={{key}}',
+        ruleSearch: { bookList: '.book', name: '.name', author: '.author', bookUrl: '.name@href' },
+        ruleToc: { chapterList: '.c', chapterName: 'a', chapterUrl: 'a@href' },
+        ruleContent: { content: '#c' }
+      },
+      name: url === first.url ? '源A' : '源B',
+      url,
+      group: '',
+      searchUrl: '/s?q={{key}}',
+      header: {},
+      customOrder: 0,
+      compat: { level: 'full' as const, issues: [] }
+    })
+    const store = new SourceStore(root)
+    await store.importParsed([parsed(first.url), parsed(second.url)])
+    const storeService = new SourceService(store, new HttpClient(), new LibraryRepository(root))
+    const library = new LibraryRepository(root)
+    const [sourceA, sourceB] = await storeService.list()
+    await library.add({
+      id: 'shelf-1',
+      title: '同名书',
+      format: 'network',
+      normalizedTitle: '同名书',
+      sourceFileName: '同名书.txt',
+      fileHash: 'hash-shelf',
+      encoding: 'utf-8',
+      importedAt: '2026-01-01T00:00:00.000Z',
+      lastReadAt: null,
+      chapterCount: 2,
+      progressPercent: 0,
+      stats: { adLinesRemoved: 0, duplicateParagraphsMerged: 0, suspectedDuplicateChapters: 0 },
+      sourceId: sourceA.id,
+      sourceName: '源A',
+      bookUrl: `${first.url}/a-book`
+    })
+    const service = new NetworkSearchService(storeService, store, new SourceReader(new HttpClient()), library)
+    const done = await service.search(
+      { requestId: 'r-shelf', keyword: '同名书', scope: 'quality' },
+      { source: () => {}, results: () => {} }
+    )
+    const items = done.groups[0].items
+    const itemA = items.find((item) => item.sourceId === sourceA.id)
+    const itemB = items.find((item) => item.sourceId === sourceB.id)
+    expect(itemA?.inShelf).toBe(true)
+    expect(itemA?.shelfId).toBe('shelf-1')
+    expect(itemB?.inShelf).toBe(false)
+    expect(itemB?.shelfId).toBeUndefined()
+  })
+
   it('maps non-Chinese errors to a search failure message and keeps Chinese ones', async () => {
     const now = new Date().toISOString()
     const items = [

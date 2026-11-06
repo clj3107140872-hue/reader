@@ -3,7 +3,7 @@ import type {
   NetworkSearchItem,
   SourceListItem
 } from '../../../core/booksource/model'
-import { mergeSearchResults, normalizeSearchTitle } from '../../../core/booksource/searchResults'
+import { mergeSearchResults } from '../../../core/booksource/searchResults'
 import { selectQualitySources } from '../../../core/booksource/quality'
 import type {
   NetworkSearchDone,
@@ -11,6 +11,7 @@ import type {
   NetworkSearchSourceEvent
 } from '../../../shared/api'
 import type { LibraryRepository } from '../../storage/library'
+import { userFacingNetworkError } from './errors'
 import { NetworkError } from './httpClient'
 import type { SourceReader } from './sourceReader'
 import type { SourceService } from './sourceService'
@@ -22,8 +23,8 @@ const PER_SOURCE_LIMIT = 100
 const CHINESE = /[㐀-鿿]/
 
 /** The renderer has its own error formatter; the main process keeps a local one. */
-function messageOf(error: unknown): string {
-  if (error instanceof NetworkError) return error.message
+function messageOf(error: unknown, sourceName: string): string {
+  if (error instanceof NetworkError) return userFacingNetworkError(error, sourceName)
   const message = error instanceof Error ? error.message : ''
   return CHINESE.test(message) ? message : '搜索失败'
 }
@@ -88,11 +89,14 @@ export class NetworkSearchService {
         : selectQualitySources(all)
       if (pool.length === 0) throw new Error('没有可用的书源，请先导入或启用书源')
       const entries = await this.library.list()
-      const shelfTitles = new Set(
-        entries
-          .filter((entry) => entry.format === 'network')
-          .map((entry) => normalizeSearchTitle(entry.title))
-      )
+      // spec 7.5：书架里是否已有这本书按 sourceId + bookUrl 判断，同名的
+      // 不同书不能互相标记；命中时带上书架 id 供「已在书架」直接打开。
+      const shelf = new Map<string, string>()
+      for (const entry of entries) {
+        if (entry.format === 'network' && entry.sourceId && entry.bookUrl) {
+          shelf.set(`${entry.sourceId}|${entry.bookUrl}`, entry.id)
+        }
+      }
       const queue = [...pool]
       const collected: NetworkSearchItem[] = []
       let searched = 0
@@ -118,22 +122,26 @@ export class NetworkSearchService {
           // instead of recording a success for a search the user cancelled or
           // a source that was deleted/disabled mid-search.
           if (job.cancelled || sourceController.signal.aborted) return
-          const results = page.slice(0, PER_SOURCE_LIMIT).map((entry) => ({
-            sourceId: item.id,
-            sourceName: item.name,
-            title: entry.title,
-            author: entry.author,
-            ...(entry.intro ? { intro: entry.intro } : {}),
-            ...(entry.kind ? { kind: entry.kind } : {}),
-            ...(entry.coverUrl ? { coverUrl: entry.coverUrl } : {}),
-            bookUrl: entry.bookUrl,
-            ...(entry.lastChapter ? { lastChapter: entry.lastChapter } : {}),
-            qualityScore: item.score,
-            starred: item.starred,
-            inShelf: shelfTitles.has(normalizeSearchTitle(entry.title)),
-            avgMs: item.avgMs,
-            importedAt: item.importedAt
-          }))
+          const results = page.slice(0, PER_SOURCE_LIMIT).map((entry) => {
+            const shelfId = shelf.get(`${item.id}|${entry.bookUrl}`)
+            return {
+              sourceId: item.id,
+              sourceName: item.name,
+              title: entry.title,
+              author: entry.author,
+              ...(entry.intro ? { intro: entry.intro } : {}),
+              ...(entry.kind ? { kind: entry.kind } : {}),
+              ...(entry.coverUrl ? { coverUrl: entry.coverUrl } : {}),
+              bookUrl: entry.bookUrl,
+              ...(entry.lastChapter ? { lastChapter: entry.lastChapter } : {}),
+              qualityScore: item.score,
+              starred: item.starred,
+              inShelf: shelfId !== undefined,
+              ...(shelfId ? { shelfId } : {}),
+              avgMs: item.avgMs,
+              importedAt: item.importedAt
+            }
+          })
           await this.store.record(item.id, 'search', results.length ? 'success' : 'empty', Date.now() - started)
           if (results.length === 0) empty++
           else succeeded++
@@ -149,7 +157,7 @@ export class NetworkSearchService {
         } catch (error) {
           if (job.cancelled || sourceController.signal.aborted) return
           failed++
-          const message = messageOf(error)
+          const message = messageOf(error, item.name)
           await this.store.record(item.id, 'search', 'error', Date.now() - started, message)
           emit.source({
             requestId: request.requestId,
