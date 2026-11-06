@@ -12,13 +12,17 @@ export default function Sources({ onBack }: { onBack: () => void }) {
   const [deleting, setDeleting] = useState<SourceListItem | null>(null)
   const [toast, setToast] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
 
   const refresh = async (): Promise<void> => {
     setSources(await window.api.sourceList())
+    setError('')
   }
 
   useEffect(() => {
-    void refresh().catch((reason) => setError(errorText(reason)))
+    void refresh()
+      .catch((reason) => setError(errorText(reason)))
+      .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
@@ -29,7 +33,7 @@ export default function Sources({ onBack }: { onBack: () => void }) {
 
   const onImported = (result: ImportSourcesResult): void => {
     setToast(`新增 ${result.added} 个，更新 ${result.updated} 个`)
-    void refresh()
+    void refresh().catch((reason) => setToast(`刷新列表失败：${errorText(reason)}`))
   }
 
   const onFlags = async (
@@ -46,6 +50,10 @@ export default function Sources({ onBack }: { onBack: () => void }) {
   const onRaw = async (source: SourceListItem): Promise<void> => {
     try {
       const definition = await window.api.sourceRaw(source.id)
+      if (!definition) {
+        setToast('读取失败：找不到这个书源')
+        return
+      }
       setRaw({ source, json: JSON.stringify(definition, null, 2) })
     } catch (reason) {
       setToast(`读取失败：${errorText(reason)}`)
@@ -58,9 +66,14 @@ export default function Sources({ onBack }: { onBack: () => void }) {
       await window.api.deleteSource(deleting.id)
       setDeleting(null)
       setToast('书源已删除；已加入书架的书仍可读已缓存章节')
-      await refresh()
     } catch (reason) {
       setToast(`删除失败：${errorText(reason)}`)
+      return
+    }
+    try {
+      await refresh()
+    } catch (reason) {
+      setToast(`刷新列表失败：${errorText(reason)}`)
     }
   }
 
@@ -74,7 +87,11 @@ export default function Sources({ onBack }: { onBack: () => void }) {
         </div>
       </header>
       {error && <p className="modal-error">{error}</p>}
-      <SourceList sources={sources} onFlags={(source, flags) => void onFlags(source, flags)} onRaw={(source) => void onRaw(source)} onDelete={setDeleting} />
+      {loading ? (
+        <p className="empty">加载中…</p>
+      ) : (
+        <SourceList sources={sources} onFlags={(source, flags) => void onFlags(source, flags)} onRaw={(source) => void onRaw(source)} onDelete={setDeleting} />
+      )}
       {toast && <div className="toast" role="status">{toast}</div>}
       {importing && (
         <SourceImportDialog onClose={() => setImporting(false)} onImported={onImported} />

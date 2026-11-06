@@ -11,5 +11,6 @@ describe('SourceImportDialog', () => {
     expect(html).toContain('选择文件')
     expect(html).toContain('从链接导入')
     expect(html).toContain('JS')
+    expect(html).toContain('class="modal-button" disabled="">导入</button>')
   })
 })

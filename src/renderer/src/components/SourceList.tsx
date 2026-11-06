@@ -1,4 +1,12 @@
 import type { SourceListItem } from '../../../core/booksource/model'
+import { errorText } from '../errors'
+
+const OPERATION_LABELS: Record<string, string> = {
+  search: '搜索',
+  info: '详情',
+  toc: '目录',
+  content: '正文'
+}
 
 function scoreClass(score: number): string {
   return score >= 70 ? 'good' : score >= 40 ? 'mid' : 'bad'
@@ -39,7 +47,7 @@ export default function SourceList({
             )}
             {source.lastError && (
               <div className="source-sub warn">
-                最近失败：{source.lastError.operation} · {source.lastError.message}
+                最近失败：{OPERATION_LABELS[source.lastError.operation] ?? source.lastError.operation} · {errorText(source.lastError.message)}
               </div>
             )}
           </div>

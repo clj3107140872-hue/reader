@@ -1693,8 +1693,12 @@ body[data-slacking='code'] { background: #121314; }
 .source-main { min-width: 0; }
 .source-title { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .source-sub { margin-top: 4px; color: #6b6b6b; font-size: 12px; overflow-wrap: anywhere; }
+.source-sub.warn, .modal-body .warn { color: #a45b2a; }
 .source-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .source-actions label { display: flex; gap: 4px; align-items: center; font-size: 12px; }
+.source-actions button { border: 1px solid #e2ddd2; border-radius: 6px; background: #fff; color: #2b2b2b; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+.source-actions button.ghost { background: transparent; color: #4a6741; border-color: #d8d3c8; }
+.source-actions button.danger { color: #a4402f; border-color: #e0c4bd; }
 .tag { border-radius: 999px; padding: 1px 6px; font-size: 11px; background: #e2ddd2; }
 .tag.star { color: #b8860b; }
 .tag.black { color: #a4402f; }
