@@ -61,6 +61,23 @@ describe('HttpClient', () => {
     })
   })
 
+  it('stops a request when the caller aborts and never retries it', async () => {
+    const server = await startFakeServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end('<p>迟到的响应</p>')
+    })
+    close = server.close
+    server.delayMs = 200
+    const controller = new AbortController()
+    const client = new HttpClient()
+    const running = client.request({ url: `${server.url}/slow`, signal: controller.signal })
+    setTimeout(() => controller.abort(), 30)
+    const error = await running.catch((reason: unknown) => reason)
+    expect(error).toBeInstanceOf(NetworkError)
+    expect((error as Error).message).toMatch(/[一-鿿]/)
+    expect(server.requestCount).toBe(1)
+  })
+
   it('decodes GBK', async () => {
     const server = await startFakeServer((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/plain' })

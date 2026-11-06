@@ -847,6 +847,7 @@ if (hasSingleInstanceLock) {
     )
     ipcMain.handle('library:remove', async (_event, id: string) => {
       networkBookService.cancelBookTasks(id)
+      networkBookService.cancelBookUpdate(id)
       await libraryService.remove(id)
     })
     ipcMain.handle('backup:list', (_event, id: unknown) =>

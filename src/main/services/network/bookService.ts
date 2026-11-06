@@ -568,21 +568,23 @@ export class NetworkBookService {
     return entry
   }
 
+  /** 只中止这本书的下载任务（取消下载、删书共用）。 */
   cancelBookTasks(id: string, reason?: 'source-deleted' | 'source-disabled'): void {
     const job = this.downloadJobs.get(id)
-    if (job) {
-      if (reason) job.reason = reason
-      job.controller.abort()
-    }
-    // 删书（无 reason）也要停掉目录请求，但不报「书源已删除/停用」。
-    const toc = this.tocControllers.get(id)
-    if (toc) {
-      if (reason) this.tocCancelReasons.set(id, reason)
-      toc.abort()
-    }
+    if (!job) return
+    if (reason) job.reason = reason
+    job.controller.abort()
   }
 
-  /** 书源被删除/停用：中止仍指向该来源的所有网络书的下载和目录请求。 */
+  /** 中止这本书正在进行的目录更新；删书这类普通中止不写 reason。 */
+  cancelBookUpdate(id: string, reason?: 'source-deleted' | 'source-disabled'): void {
+    const toc = this.tocControllers.get(id)
+    if (!toc) return
+    if (reason) this.tocCancelReasons.set(id, reason)
+    toc.abort()
+  }
+
+  /** 书源被删除/停用：中止仍指向该来源的所有网络书的下载和目录更新。 */
   async cancelSourceTasks(
     sourceId: string,
     reason: 'source-deleted' | 'source-disabled'
@@ -590,6 +592,7 @@ export class NetworkBookService {
     for (const entry of await this.library.list()) {
       if (entry.format === 'network' && entry.sourceId === sourceId) {
         this.cancelBookTasks(entry.id, reason)
+        this.cancelBookUpdate(entry.id, reason)
       }
     }
   }

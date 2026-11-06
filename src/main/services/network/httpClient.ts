@@ -228,10 +228,14 @@ export class HttpClient {
     const retries = request.method === 'POST' ? 0 : Math.min(1, request.retry ?? 1)
     let lastError: unknown
     for (let attempt = 0; attempt <= retries; attempt++) {
+      if (request.signal?.aborted) throw new NetworkError('请求已取消', 'network')
       try {
         return await this.requestOnce(request)
       } catch (error) {
         lastError = error
+        // An aborted caller is cancelled, not retried; a timeout or network
+        // error with a live signal keeps its normal retry.
+        if (request.signal?.aborted) break
         if (!(error instanceof NetworkError) || !['timeout', 'network'].includes(error.kind)) break
       }
     }
@@ -251,9 +255,12 @@ export class HttpClient {
     try {
       for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
         await assertAllowed(current, this.allowLocal, pinned)
+        if (request.signal?.aborted) throw new NetworkError('请求已取消', 'network')
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), request.timeoutMs ?? this.timeoutMs)
         const onAbort = (): void => controller.abort()
+        // 调用方信号若已中止，监听器不会再触发，先同步中止内部请求。
+        if (request.signal?.aborted) controller.abort()
         request.signal?.addEventListener('abort', onAbort)
         try {
           const headers: Record<string, string> = {
@@ -326,6 +333,7 @@ export class HttpClient {
           }
         } catch (error) {
           if (error instanceof NetworkError) throw error
+          if (request.signal?.aborted) throw new NetworkError('请求已取消', 'network')
           if (controller.signal.aborted) throw new NetworkError('请求超时', 'timeout')
           throw new NetworkError('网络请求失败', 'network')
         } finally {
