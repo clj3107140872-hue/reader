@@ -2,7 +2,7 @@
 
 ## 自动化
 
-- `npm test`：56 个测试文件 / 340 条用例全过
+- `npm test`：56 个测试文件 / 345 条用例全过
 - `npm run typecheck`：通过
 - `npm run build`：通过
 - `node scripts/acceptance-network.cjs`：通过（离屏、临时数据目录、127.0.0.1 假书源）
