@@ -178,7 +178,7 @@ export default function NetworkSearch({
         <button className="ghost" onClick={onBack}>← 书架</button>
         <h1>网络搜索</h1>
         <div className="toolbar-actions">
-          <select value={scope} onChange={(event) => setScope(event.target.value as 'quality' | 'all')} aria-label="搜索范围">
+          <select className="network-scope" value={scope} onChange={(event) => setScope(event.target.value as 'quality' | 'all')} aria-label="搜索范围">
             <option value="quality">优质书源</option>
             <option value="all">全量书源</option>
           </select>
