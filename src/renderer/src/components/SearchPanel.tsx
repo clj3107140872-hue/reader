@@ -6,18 +6,11 @@ import type { SearchHit, SearchProgress } from '../../../shared/api'
 interface SearchPanelProps {
   bookId: string
   chapters: ChapterMeta[]
-  cachedOnly?: boolean
   onJump: (chapterIndex: number, paragraphIndex: number) => void
   onClose: () => void
 }
 
-export default function SearchPanel({
-  bookId,
-  chapters,
-  cachedOnly = false,
-  onJump,
-  onClose
-}: SearchPanelProps) {
+export default function SearchPanel({ bookId, chapters, onJump, onClose }: SearchPanelProps) {
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<SearchHit[]>([])
   const [progress, setProgress] = useState<SearchProgress | null>(null)

@@ -310,7 +310,14 @@ body[data-slacking='code'] { background: #121314; }
   font-style: italic;
 }
 .chapter-placeholder.error { color: var(--reader-danger); font-style: normal; }
-.chapter-placeholder .ghost { margin-left: 8px; }
+.chapter-placeholder .ghost {
+  margin-left: 8px;
+  background: transparent;
+  border: none;
+  color: var(--reader-accent);
+  font: inherit;
+  cursor: pointer;
+}
 .loading { color: #8a8a8a; padding: 48px; text-align: center; }
 .reader-error { padding: 64px 32px; text-align: center; color: #8a3b2e; }
 .reader-error button {

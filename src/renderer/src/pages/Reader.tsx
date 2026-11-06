@@ -545,6 +545,12 @@ export default function Reader({
     chapterIndex: 0,
     paragraphIndex: 0
   })
+  // A jump into a lazy network chapter keeps its requested paragraph here
+  // until the chapter (and every rendered chapter above it) has loaded.
+  const pendingTargetRef = useRef<{ chapterIndex: number; paragraphIndex: number } | null>(null)
+  // Set by wheel and keyboard scrolling so handleScroll can tell a real user
+  // scroll from the browser clamping scrollTop while placeholders load.
+  const userScrollRef = useRef(false)
   const pagedRef = useRef(paged)
   pagedRef.current = paged
   const layout = codeLayout(editorHeight, commentLines)
@@ -567,6 +573,8 @@ export default function Reader({
     setError('')
     setWarningHidden(false)
     restoredRef.current = false
+    pendingTargetRef.current = null
+    userScrollRef.current = false
     window.api
       .openBook(bookId)
       .then((payload) => {
@@ -763,10 +771,15 @@ export default function Reader({
       const raw =
         book.contentMode === 'lazy' ? (texts[index] ?? '') : (book.chapters[index] ?? '')
       const state = states[index]
+      // A lazy chapter without text and without an error has simply not been
+      // requested yet: show it as loading instead of "本章暂无内容".
+      const loading =
+        state?.loading ??
+        (book.contentMode === 'lazy' && texts[index] === undefined && !state?.error)
       return {
         meta,
         paragraphs: splitParagraphs(raw),
-        ...(state?.loading ? { loading: true } : {}),
+        ...(loading ? { loading: true } : {}),
         ...(state?.error ? { error: state.error } : {})
       }
     })
@@ -919,6 +932,34 @@ export default function Reader({
     []
   )
 
+  /**
+   * Applies a jump once its chapter (and, in scroll mode, the chapters above
+   * it) are in place. Paged mode may have to render the target chapter first,
+   * so it retries across a few frames.
+   */
+  const applyJump = useCallback(
+    (chapterIndex: number, paragraphIndex: number): void => {
+      pendingTargetRef.current = null
+      if (!pagedRef.current) {
+        scrollToPosition(chapterIndex, paragraphIndex)
+        return
+      }
+      let attempts = 0
+      const apply = (): void => {
+        if (!pagedRef.current) return
+        const scroller = scrollRef.current
+        const rendered = scroller?.querySelector(`[data-chapter-section="${chapterIndex}"]`)
+        if (!rendered) {
+          if (attempts++ < 8) window.requestAnimationFrame(apply)
+          return
+        }
+        applyPagedAnchor({ chapterIndex, paragraphIndex })
+      }
+      window.requestAnimationFrame(apply)
+    },
+    [applyPagedAnchor, scrollToPosition]
+  )
+
   /** Chapter and paragraph at the top of the page currently on screen. */
   const currentPosition = useCallback(
     (probeY?: number): { chapterIndex: number; paragraphIndex: number } | null => {
@@ -1023,8 +1064,10 @@ export default function Reader({
   turnPageRef.current = turnPage
 
   /**
-   * Jumps to a paragraph in whichever mode is active. Paged mode may have to
-   * render the target chapter first, so it retries across a few frames.
+   * Jumps to a paragraph in whichever mode is active. A lazy network chapter
+   * has no paragraphs until its text arrives, so the requested paragraph is
+   * kept as a pending target and applied after the chapter around it loads
+   * instead of being clamped against the empty placeholder.
    */
   const goToPosition = useCallback(
     (rawChapterIndex: number, rawParagraphIndex: number): void => {
@@ -1033,36 +1076,51 @@ export default function Reader({
         Math.max(rawChapterIndex, 0),
         book.meta.chapters.length - 1
       )
-      const paragraphIndex = Math.min(
-        Math.max(rawParagraphIndex, 0),
-        Math.max(0, (paragraphs[chapterIndex]?.length ?? 1) - 1)
-      )
+      const available = paragraphs[chapterIndex]?.length ?? 0
+      const paragraphIndex =
+        book.contentMode === 'lazy' && available === 0
+          ? Math.max(rawParagraphIndex, 0)
+          : Math.min(Math.max(rawParagraphIndex, 0), Math.max(0, available - 1))
       const percent = percentFor(chapterIndex, paragraphIndex)
       const next = { chapterIndex, paragraphIndex, percent }
       anchorRef.current = { chapterIndex, paragraphIndex }
       setCurrent(next)
       scheduleSave(next)
-      if (!paged) {
-        scrollToPosition(chapterIndex, paragraphIndex)
+      if (book.contentMode === 'lazy') {
+        pendingTargetRef.current = { chapterIndex, paragraphIndex }
+        userScrollRef.current = false
+        // The settle effect only fires when a chapter state changes, so a
+        // jump whose chapters are all loaded already is applied right away.
+        const targetStart = chapterWindow(book.meta.chapters.length, chapterIndex).start
+        const settled = (index: number): boolean =>
+          texts[index] !== undefined || Boolean(states[index]?.error)
+        let ready = settled(chapterIndex)
+        if (ready && !paged) {
+          for (let index = targetStart; index < chapterIndex; index++) {
+            if (!settled(index)) {
+              ready = false
+              break
+            }
+          }
+        }
+        if (ready) applyJump(chapterIndex, paragraphIndex)
         return
       }
-      let attempts = 0
-      const apply = (): void => {
-        if (!pagedRef.current) return
-        const scroller = scrollRef.current
-        const rendered = scroller?.querySelector(`[data-chapter-section="${chapterIndex}"]`)
-        if (!rendered) {
-          if (attempts++ < 8) window.requestAnimationFrame(apply)
-          return
-        }
-        applyPagedAnchor({ chapterIndex, paragraphIndex })
-      }
-      window.requestAnimationFrame(apply)
+      applyJump(chapterIndex, paragraphIndex)
     },
-    [book, paged, paragraphs, percentFor, applyPagedAnchor, scheduleSave, scrollToPosition]
+    [applyJump, book, paged, paragraphs, percentFor, scheduleSave, states, texts]
   )
 
   const handleScroll = useCallback((): void => {
+    if (pendingTargetRef.current) {
+      // A wheel or keyboard scroll cancels a jump that is still waiting for
+      // its chapter. Any other scroll here is the browser clamping scrollTop
+      // while the window slides to placeholders; it must neither cancel the
+      // jump nor rewrite the position being jumped to.
+      if (!userScrollRef.current) return
+      userScrollRef.current = false
+      pendingTargetRef.current = null
+    }
     if (rafRef.current !== 0) return
     rafRef.current = window.requestAnimationFrame(() => {
       rafRef.current = 0
@@ -1133,6 +1191,13 @@ export default function Reader({
     anchorRef.current = { chapterIndex, paragraphIndex }
     setCurrent(next)
     scheduleSave(next)
+    if (book.contentMode === 'lazy') {
+      // The target text is already here; the settle effect below waits for
+      // the chapters above it before scrolling.
+      pendingTargetRef.current = { chapterIndex, paragraphIndex }
+      userScrollRef.current = false
+      return
+    }
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         if (pagedRef.current) goToPosition(chapterIndex, paragraphIndex)
@@ -1149,13 +1214,34 @@ export default function Reader({
     goToPosition
   ])
 
-  // A page is recomputed whenever the chapter, the mode or the typography
-  // changes. The anchor paragraph keeps the reading spot across the reflow.
-  // Runs before paint so the new chapter never flashes its first page.
+  // A jump into a lazy network chapter waits until the target text has
+  // arrived and every rendered chapter above it has settled: a placeholder
+  // that grows later would drag the target out of view.
+  useEffect(() => {
+    const target = pendingTargetRef.current
+    if (!target) return
+    const { chapterIndex, paragraphIndex } = target
+    if (windowRange.start !== chapterWindow(chapterCount, chapterIndex).start) return
+    const settled = (index: number): boolean =>
+      texts[index] !== undefined || Boolean(states[index]?.error)
+    if (!settled(chapterIndex)) return
+    if (!paged) {
+      for (let index = windowRange.start; index < chapterIndex; index++) {
+        if (!settled(index)) return
+      }
+    }
+    applyJump(chapterIndex, paragraphIndex)
+  }, [texts, states, paged, windowRange.start, chapterCount, applyJump])
+
+  // A page is recomputed whenever the chapter, the mode, the typography or
+  // the loaded text changes. The anchor paragraph keeps the reading spot
+  // across the reflow, and a lazy chapter that just replaced its placeholder
+  // gets re-measured into real pages. Runs before paint so the new chapter
+  // never flashes its first page.
   useLayoutEffect(() => {
     if (!paged || !book) return
     applyPagedAnchor(anchorRef.current)
-  }, [paged, book, current.chapterIndex, settings.typography, applyPagedAnchor])
+  }, [paged, book, current.chapterIndex, settings.typography, paragraphs, applyPagedAnchor])
 
   // Resizing changes how much text fits on a page, so move the view back to
   // the page that holds the anchor paragraph. The observer fires after layout,
@@ -1242,6 +1328,7 @@ export default function Reader({
         const step = wheelLineStep(event.deltaY, event.deltaMode, travel)
         travel = step.travel
         if (step.lines === 0) return
+        userScrollRef.current = true
         scroller.scrollTop += step.lines * CODE_ROW_HEIGHT
       }
 
@@ -1257,6 +1344,7 @@ export default function Reader({
       if (event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return
       if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
       event.preventDefault()
+      userScrollRef.current = true
       scroller.scrollTop += event.deltaY * WHEEL_DISTANCE_SCALE
     }
 
@@ -1364,6 +1452,7 @@ export default function Reader({
 
   const scrollByScreen = useCallback(
     (direction: number): void => {
+      userScrollRef.current = true
       const scroller = scrollRef.current
       if (!scroller) return
       if (style === 'code') {
@@ -1739,7 +1828,6 @@ export default function Reader({
             <SearchPanel
               bookId={bookId}
               chapters={book.meta.chapters}
-              cachedOnly={book.contentMode === 'lazy'}
               onJump={jumpToPosition}
               onClose={() => setDrawer(null)}
             />
