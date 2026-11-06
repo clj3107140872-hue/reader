@@ -187,6 +187,9 @@ export class NetworkBookService {
         this.readSemaphore.run(async () => {
           const again = await this.networkBooks.readChapterText(id, index)
           if (again) return again
+          // 这个请求可能在外层检查之后才登记到 chapterRequests，转换开始前
+          // 再查一次，避免转换期间往旧目录写章节。
+          if (this.converting.has(id)) throw new Error('正在转为本地书，请稍候')
           const meta = await this.networkBooks.readMeta(id)
           if (meta.format !== 'network' || !meta.network) throw new Error('这不是网络书')
           const chapter = meta.chapters[index]
@@ -251,24 +254,36 @@ export class NetworkBookService {
           throw new Error('未下载全本，无法转为本地书')
         }
         const progress = await this.books.readProgress(id)
+        const entry = await this.entryFor(id)
         const bookDir = join(this.root, 'books', id)
         const snapshot = join(this.root, '.convert', `${id}-${Date.now()}`)
-        await fs.mkdir(join(this.root, '.convert'), { recursive: true })
-        await fs.cp(bookDir, snapshot, { recursive: true })
         const warnings: string[] = []
+        let writeStarted = false
+        let keepSnapshot = false
         try {
+          await fs.mkdir(join(this.root, '.convert'), { recursive: true })
+          await fs.cp(bookDir, snapshot, { recursive: true })
+          // spec 8.4：source.txt 每章都写标题行（即使本地切章器不认识这个
+          // TOC 标题），再写 raw 段落，章间空行；卷章节只写标题。
           const sourceChapters: CleanedChapter[] = []
           const cleanedChapters: CleanedChapter[] = []
+          const sourceLines: string[] = []
+          let line = 0
           for (const chapter of meta.chapters) {
+            const startLine = line
+            sourceLines.push(chapter.title)
+            line++
             if (chapter.level === 'volume') {
-              const empty: CleanedChapter = {
+              sourceLines.push('')
+              line++
+              const volume: CleanedChapter = {
                 title: chapter.title,
                 level: 'volume',
-                startLine: 0,
+                startLine,
                 paragraphs: []
               }
-              sourceChapters.push(empty)
-              cleanedChapters.push({ ...empty })
+              sourceChapters.push(volume)
+              cleanedChapters.push({ ...volume })
               continue
             }
             const raw = await this.networkBooks.readRawChapter(id, chapter.index)
@@ -278,31 +293,36 @@ export class NetworkBookService {
             }
             const sourceParagraphs = (raw ?? cleaned)
               .split(/\r?\n/)
-              .map((line) => line.trim())
+              .map((part) => part.trim())
               .filter(Boolean)
             if (sourceParagraphs[0] === chapter.title) sourceParagraphs.shift()
+            for (const paragraph of sourceParagraphs) {
+              sourceLines.push(paragraph, '')
+              line += 2
+            }
             sourceChapters.push({
               title: chapter.title,
               level: chapter.level,
-              startLine: 0,
+              startLine,
               paragraphs: sourceParagraphs
             })
             cleanedChapters.push({
               title: chapter.title,
               level: chapter.level,
-              startLine: 0,
+              startLine,
               paragraphs: cleaned.split(/\n{2,}/).map((part) => part.trim()).filter(Boolean)
             })
           }
 
-          // source.txt 与每章 startLine 由 raw 正文生成；charCount/simhash
-          // 必须用清洗后正文，保证同书合并与重复章节检测正常。
+          // startLine 与 source.txt 由上面的显式拼装保证一致；charCount/
+          // simhash 必须用清洗后正文，保证同书合并与重复章节检测正常。
           const documents = buildBookDocuments({
             id,
             title: meta.title,
             encoding: 'utf-8',
             createdAt: meta.createdAt,
             chapters: sourceChapters,
+            sourceText: sourceLines.join('\n'),
             format: 'txt',
             ...(meta.author ? { author: meta.author } : {}),
             ...(meta.cover ? { cover: meta.cover } : {})
@@ -320,6 +340,7 @@ export class NetworkBookService {
             ...(meta.kind ? { kind: meta.kind } : {})
           }
 
+          writeStarted = true
           await this.books.writeBook(
             { meta: localMeta, sourceText: documents.sourceText, chapters: cleanedChapters },
             { backup: false }
@@ -329,7 +350,13 @@ export class NetworkBookService {
             format: 'txt',
             sourceId: undefined,
             networkCache: undefined,
-            downloadState: undefined
+            downloadState: undefined,
+            stats: {
+              ...entry.stats,
+              suspectedDuplicateChapters: localMeta.chapters.filter(
+                (chapter) => chapter.flags.suspectedDuplicate
+              ).length
+            }
           })
           return {
             id,
@@ -337,11 +364,19 @@ export class NetworkBookService {
             warnings
           }
         } catch (reason) {
-          await fs.rm(bookDir, { recursive: true, force: true })
-          await fs.rename(snapshot, bookDir)
+          // writeBook 会删掉原网络书目录；快照是唯一副本，恢复失败时必须保留。
+          if (writeStarted) {
+            try {
+              await fs.rm(bookDir, { recursive: true, force: true })
+              await fs.rename(snapshot, bookDir)
+            } catch {
+              keepSnapshot = true
+              throw new Error('转为本地书失败，原书快照已保留在 .convert 目录，请稍后重试')
+            }
+          }
           throw reason
         } finally {
-          await fs.rm(snapshot, { recursive: true, force: true })
+          if (!keepSnapshot) await fs.rm(snapshot, { recursive: true, force: true })
         }
       })
     } finally {

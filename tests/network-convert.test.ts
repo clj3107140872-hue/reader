@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { startFakeServer } from './helpers/networkServer'
 import type { ParsedSource } from '../src/core/booksource/legado'
 import { SourceStore } from '../src/main/services/network/sourceStore'
@@ -75,7 +75,9 @@ describe('NetworkBookService conversion', () => {
     const { service, server, books, library, networkBooks } = await setup()
     const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
     await service.downloadAll(entry.id, () => {})
-    // raw 首行与章节标题相同时，转换后只保留一行标题。
+    // raw 首行与章节标题相同时，转换后只保留一行标题；raw 里混入的广告行
+    // 不能进入清洗后的 charCount。
+    await networkBooks.writeChapter(entry.id, 0, '第一章\n正文一\n（广告）', '正文一')
     await networkBooks.writeChapter(entry.id, 1, '第二章\n正文二', '正文二')
     await books.writeProgress(entry.id, {
       progress: { chapterKey: 'x', chapterIndex: 1, paragraphIndex: 0, percent: 50, updatedAt: new Date().toISOString() },
@@ -92,15 +94,49 @@ describe('NetworkBookService conversion', () => {
     const lines = (await books.readSource(entry.id)).split(/\r?\n/)
     expect(lines[meta.chapters[1].startLine]).toBe('第二章')
     expect(lines.filter((line) => line === '第二章')).toHaveLength(1)
+    expect(meta.chapters[0].charCount).toBe('正文一'.length)
     expect(meta.chapters[1].charCount).toBe('正文二'.length)
     expect(meta.chapters[1].simhash).not.toBe('')
     const updated = (await library.list()).find((item) => item.id === entry.id)!
     expect(updated.format).toBe('txt')
     expect(updated.sourceName).toBe('源A')
+    expect(updated.sourceId).toBeUndefined()
+    expect(updated.networkCache).toBeUndefined()
     expect(updated.downloadState).toBeUndefined()
     expect(updated.progressPercent).toBe(0)
     expect((await books.readProgress(entry.id)).progress?.chapterIndex).toBe(1)
     expect(await books.readChapter(entry.id, 1)).toContain('正文二')
+  })
+
+  it('writes a title line for TOC names the local splitter does not recognize', async () => {
+    const { service, server, books, networkBooks } = await setup()
+    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    await service.downloadAll(entry.id, () => {})
+    const networkMeta = await networkBooks.readMeta(entry.id)
+    networkMeta.chapters[0].title = '上架感言'
+    await networkBooks.writeMeta(entry.id, networkMeta)
+    await networkBooks.writeChapter(entry.id, 0, '上架感言\n正文一', '正文一')
+
+    await service.convertToLocal(entry.id)
+    const meta = await books.readMeta(entry.id)
+    const lines = (await books.readSource(entry.id)).split(/\r?\n/)
+    expect(lines[meta.chapters[0].startLine]).toBe('上架感言')
+    expect(lines[meta.chapters[1].startLine]).toBe('第二章')
+    expect(meta.chapters[0].charCount).toBe('正文一'.length)
+  })
+
+  it('restores the network book when conversion fails after writing starts', async () => {
+    const { service, server, library, networkBooks } = await setup()
+    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    await service.downloadAll(entry.id, () => {})
+    const update = vi.spyOn(library, 'update').mockRejectedValueOnce(new Error('boom'))
+    await expect(service.convertToLocal(entry.id)).rejects.toThrow('boom')
+    update.mockRestore()
+
+    expect((await networkBooks.readMeta(entry.id)).format).toBe('network')
+    expect(await networkBooks.readRawChapter(entry.id, 0)).toContain('正文一')
+    expect((await library.list())[0].format).toBe('network')
+    expect((await service.convertToLocal(entry.id)).chapterCount).toBe(2)
   })
 
   it('keeps cached chapters readable after the source is deleted', async () => {
