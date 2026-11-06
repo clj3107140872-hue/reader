@@ -1,7 +1,7 @@
 import { gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startFakeServer } from './helpers/networkServer'
-import { HttpClient, NetworkError } from '../src/main/services/network/httpClient'
+import { HttpClient } from '../src/main/services/network/httpClient'
 
 process.env.READER_ALLOW_LOCAL_SOURCES = '1'
 
@@ -23,12 +23,15 @@ describe('HttpClient', () => {
   })
 
   it('blocks private addresses unless the test flag is on', async () => {
-    const client = new HttpClient()
     const previous = process.env.READER_ALLOW_LOCAL_SOURCES
     delete process.env.READER_ALLOW_LOCAL_SOURCES
-    await expect(client.request({ url: 'http://127.0.0.1:9/' }))
-      .rejects.toBeInstanceOf(NetworkError)
-    process.env.READER_ALLOW_LOCAL_SOURCES = previous
+    try {
+      const client = new HttpClient()
+      await expect(client.request({ url: 'http://127.0.0.1:9/' }))
+        .rejects.toMatchObject({ kind: 'blocked' })
+    } finally {
+      process.env.READER_ALLOW_LOCAL_SOURCES = previous
+    }
   })
 
   it('decodes GBK', async () => {
