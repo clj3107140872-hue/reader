@@ -9,8 +9,9 @@ import {
 import type { SettingsPatch } from '../../shared/settings'
 import Library from './pages/Library'
 import Reader from './pages/Reader'
+import Sources from './pages/Sources'
 
-type View = { name: 'library' } | { name: 'reader'; bookId: string }
+type View = { name: 'library' } | { name: 'reader'; bookId: string } | { name: 'sources' }
 
 // A disguise window is created with the book and style in its URL, so the
 // first paint already looks right instead of flashing the normal reader.
@@ -126,8 +127,14 @@ export default function App() {
           onSettingsChange={updateSettings}
           onBack={() => setView({ name: 'library' })}
         />
+      ) : view.name === 'sources' ? (
+        <Sources onBack={() => setView({ name: 'library' })} />
       ) : (
-        <Library onOpen={(bookId) => setView({ name: 'reader', bookId })} />
+        <Library
+          networkEnabled={settings.network.enabled}
+          onOpen={(bookId) => setView({ name: 'reader', bookId })}
+          onOpenSources={() => setView({ name: 'sources' })}
+        />
       )}
     </>
   )

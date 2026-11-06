@@ -218,6 +218,27 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
       </section>
 
       <section className="setting-group">
+        <h3>网络</h3>
+        <label className="setting-check">
+          <input
+            type="checkbox"
+            checked={settings.network.enabled}
+            onChange={(event) => onChange({ network: { enabled: event.target.checked } })}
+          />
+          允许联网
+        </label>
+        <label className="setting-check">
+          <input
+            type="checkbox"
+            checked={settings.network.autoCheckOnOpen}
+            onChange={(event) => onChange({ network: { autoCheckOnOpen: event.target.checked } })}
+          />
+          打开网络书时自动检查目录（每本每 30 分钟最多一次）
+        </label>
+        <p className="setting-hint">关闭后不能搜索、更新目录或下载；已缓存章节仍可阅读。</p>
+      </section>
+
+      <section className="setting-group">
         <h3>摸鱼模式</h3>
         <div className="disguise-grid" role="group" aria-label="伪装样式">
           {DISGUISE_OPTIONS.map((option) => (
