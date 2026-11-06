@@ -34,10 +34,13 @@ import {
   wheelPageStep
 } from '../reader/pagination'
 import { isNewResizePoint } from '../reader/resizeDrag'
+import { useChapterTexts } from '../reader/useChapterTexts'
 import {
+  chapterForPercent,
   charsBefore,
   nearestIndexByTop,
   percentAt,
+  percentForChapter,
   positionForPercent,
   resolveChapterIndex,
   totalChars
@@ -55,6 +58,8 @@ interface ReaderProps {
 interface ChapterView {
   meta: BookMeta['chapters'][number]
   paragraphs: string[]
+  loading?: boolean
+  error?: string
 }
 
 interface CurrentPosition {
@@ -445,10 +450,12 @@ function NotepadMenubar({
 
 const ReaderBody = memo(function ReaderBody({
   chapters,
-  resizing
+  resizing,
+  onRetryChapter
 }: {
   chapters: ChapterView[]
   resizing: boolean
+  onRetryChapter: (index: number) => void
 }) {
   const articleRef = useRef<HTMLElement | null>(null)
 
@@ -477,16 +484,29 @@ const ReaderBody = memo(function ReaderBody({
           data-chapter-section={chapter.meta.index}
         >
           <h2 className="chapter-title">{chapter.meta.title}</h2>
-          {chapter.paragraphs.map((text, paragraphIndex) => (
-            <p
-              key={paragraphIndex}
-              className="reader-paragraph"
-              data-chapter-index={chapter.meta.index}
-              data-paragraph-index={paragraphIndex}
-            >
-              {text}
+          {chapter.paragraphs.length > 0 ? (
+            chapter.paragraphs.map((text, paragraphIndex) => (
+              <p
+                key={paragraphIndex}
+                className="reader-paragraph"
+                data-chapter-index={chapter.meta.index}
+                data-paragraph-index={paragraphIndex}
+              >
+                {text}
+              </p>
+            ))
+          ) : chapter.loading ? (
+            <p className="chapter-placeholder">正在加载本章…</p>
+          ) : chapter.error ? (
+            <p className="chapter-placeholder error">
+              本章加载失败：{chapter.error}
+              <button className="ghost" onClick={() => onRetryChapter(chapter.meta.index)}>
+                重试
+              </button>
             </p>
-          ))}
+          ) : (
+            <p className="chapter-placeholder">本章暂无内容</p>
+          )}
         </section>
       ))}
     </article>
@@ -562,6 +582,25 @@ export default function Reader({
       alive = false
     }
   }, [bookId])
+
+  const checkedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!book || book.meta.format !== 'network' || !settings.network.autoCheckOnOpen) return
+    if (checkedRef.current === book.meta.id) return
+    const last = book.meta.network?.lastCheckAt
+    if (last && Date.now() - new Date(last).getTime() < 30 * 60 * 1000) return
+    checkedRef.current = book.meta.id
+    void window.api
+      .updateToc(bookId)
+      .then(async (result) => {
+        if (result.added === 0) return
+        setNotice(`目录已更新，新增 ${result.added} 章`)
+        const payload = await window.api.openBook(bookId)
+        setBook(payload)
+        setBookmarks(payload.bookmarks)
+      })
+      .catch(() => undefined)
+  }, [book, bookId, settings.network.autoCheckOnOpen])
 
   useEffect(() => {
     if (!notice) return
@@ -683,28 +722,57 @@ export default function Reader({
     }
   }
 
-  const chapters = useMemo<ChapterView[]>(() => {
-    if (!book) return []
-    return book.meta.chapters.map((meta, index) => ({
-      meta,
-      paragraphs: splitParagraphs(book.chapters[index] ?? '')
-    }))
-  }, [book])
-
-  const paragraphs = useMemo(() => chapters.map((chapter) => chapter.paragraphs), [chapters])
-
+  const chapterCount = book?.meta.chapters.length ?? 0
   // Only a small window of chapters lives in the DOM: the previous, current
   // and next one. A whole book in flow means every resize or font change
   // reflows tens of thousands of paragraphs, which freezes long books.
   const windowRange = useMemo(
-    () => chapterWindow(chapters.length, current.chapterIndex),
-    [chapters.length, current.chapterIndex]
+    () => chapterWindow(chapterCount, current.chapterIndex),
+    [chapterCount, current.chapterIndex]
   )
   const windowStartRef = useRef(windowRange.start)
   useLayoutEffect(() => {
     windowStartRef.current = windowRange.start
   }, [windowRange.start])
   const pendingAnchorRef = useRef<{ index: number; top: number } | null>(null)
+
+  // Network books keep only metadata in memory: the chapter around the
+  // reading position is fetched on demand and cached by the main process.
+  const restoreChapterIndex = useMemo(() => {
+    if (!book || book.contentMode !== 'lazy' || !book.progress) return -1
+    return resolveChapterIndex(book.meta, book.progress.chapterKey, book.progress.chapterIndex)
+  }, [book])
+  const desiredIndexes = useMemo(() => {
+    if (!book || book.contentMode !== 'lazy') return []
+    const indexes = paged
+      ? [current.chapterIndex]
+      : Array.from(
+          { length: windowRange.end - windowRange.start },
+          (_, offset) => windowRange.start + offset
+        )
+    if (restoreChapterIndex >= 0 && !indexes.includes(restoreChapterIndex)) {
+      indexes.push(restoreChapterIndex)
+    }
+    return indexes
+  }, [book, paged, current.chapterIndex, windowRange.start, windowRange.end, restoreChapterIndex])
+  const { texts, states, retry } = useChapterTexts(book, desiredIndexes)
+
+  const chapters = useMemo<ChapterView[]>(() => {
+    if (!book) return []
+    return book.meta.chapters.map((meta, index) => {
+      const raw =
+        book.contentMode === 'lazy' ? (texts[index] ?? '') : (book.chapters[index] ?? '')
+      const state = states[index]
+      return {
+        meta,
+        paragraphs: splitParagraphs(raw),
+        ...(state?.loading ? { loading: true } : {}),
+        ...(state?.error ? { error: state.error } : {})
+      }
+    })
+  }, [book, texts, states])
+
+  const paragraphs = useMemo(() => chapters.map((chapter) => chapter.paragraphs), [chapters])
 
   // Sliding the window by one chapter removes content above the viewport.
   // Move scrollTop by that amount so the text on screen stays where it is.
@@ -767,6 +835,18 @@ export default function Reader({
       timerRef.current = window.setTimeout(flush, 500)
     },
     [book, flush]
+  )
+
+  /** Local books have real character counts; network books count chapters. */
+  const percentFor = useCallback(
+    (chapterIndex: number, paragraphIndex: number): number => {
+      if (!book) return 0
+      if (book.contentMode === 'lazy') {
+        return percentForChapter(book.meta.chapters.length, chapterIndex)
+      }
+      return percentAt(book.meta, chapterIndex, paragraphIndex, paragraphs)
+    },
+    [book, paragraphs]
   )
 
   const scrollToPosition = useCallback((chapterIndex: number, paragraphIndex: number): void => {
@@ -881,12 +961,12 @@ export default function Reader({
     setPageIndex(index)
     const position = currentPosition(Math.min(24, scroller.clientHeight / 4))
     if (!position) return
-    const percent = percentAt(book.meta, position.chapterIndex, position.paragraphIndex, paragraphs)
+    const percent = percentFor(position.chapterIndex, position.paragraphIndex)
     const next = { ...position, percent }
     anchorRef.current = position
     setCurrent(next)
     scheduleSave(next)
-  }, [book, currentPosition, paragraphs, scheduleSave])
+  }, [book, currentPosition, percentFor, scheduleSave])
 
   /** Flips one page, crossing into the neighbouring chapter at the ends. */
   const turnPage = useCallback(
@@ -906,7 +986,7 @@ export default function Reader({
         const next = {
           chapterIndex,
           paragraphIndex: 0,
-          percent: percentAt(book.meta, chapterIndex, 0, paragraphs)
+          percent: percentFor(chapterIndex, 0)
         }
         anchorRef.current = { chapterIndex, paragraphIndex: 0 }
         pagedMetricsRef.current = null
@@ -922,7 +1002,7 @@ export default function Reader({
         const next = {
           chapterIndex,
           paragraphIndex,
-          percent: percentAt(book.meta, chapterIndex, paragraphIndex, paragraphs)
+          percent: percentFor(chapterIndex, paragraphIndex)
         }
         anchorRef.current = { chapterIndex, paragraphIndex }
         pagedMetricsRef.current = null
@@ -935,7 +1015,7 @@ export default function Reader({
       scroller.scrollLeft = scrollLeftForPage(nextIndex, metrics.width, metrics.gap)
       syncPagedFromView()
     },
-    [book, current.chapterIndex, paragraphs, scheduleSave, syncPagedFromView]
+    [book, current.chapterIndex, paragraphs, percentFor, scheduleSave, syncPagedFromView]
   )
   // Wheel and keyboard listeners stay mounted across renders; they read the
   // latest page-turn callback through this ref.
@@ -957,7 +1037,7 @@ export default function Reader({
         Math.max(rawParagraphIndex, 0),
         Math.max(0, (paragraphs[chapterIndex]?.length ?? 1) - 1)
       )
-      const percent = percentAt(book.meta, chapterIndex, paragraphIndex, paragraphs)
+      const percent = percentFor(chapterIndex, paragraphIndex)
       const next = { chapterIndex, paragraphIndex, percent }
       anchorRef.current = { chapterIndex, paragraphIndex }
       setCurrent(next)
@@ -979,7 +1059,7 @@ export default function Reader({
       }
       window.requestAnimationFrame(apply)
     },
-    [book, paged, paragraphs, applyPagedAnchor, scheduleSave, scrollToPosition]
+    [book, paged, paragraphs, percentFor, applyPagedAnchor, scheduleSave, scrollToPosition]
   )
 
   const handleScroll = useCallback((): void => {
@@ -989,7 +1069,7 @@ export default function Reader({
       if (!book) return
       const position = currentPosition()
       if (!position) return
-      const percent = percentAt(book.meta, position.chapterIndex, position.paragraphIndex, paragraphs)
+      const percent = percentFor(position.chapterIndex, position.paragraphIndex)
       const next = { ...position, percent }
       // Crossing a chapter boundary slides the rendered window. Remember where
       // a chapter that stays in the DOM sits, so the effect after the re-render
@@ -1018,7 +1098,7 @@ export default function Reader({
       setCurrent(next)
       scheduleSave(next)
     })
-  }, [book, currentPosition, paragraphs, scheduleSave])
+  }, [book, currentPosition, percentFor, scheduleSave])
 
   // A half-scrolled line would give the disguise away, so any scroll (including
   // drag-selection auto-scroll) is pulled back onto the editor's line grid.
@@ -1033,15 +1113,22 @@ export default function Reader({
     handleScroll()
   }, [handleScroll])
 
+  const restoreReady =
+    !book ||
+    book.contentMode !== 'lazy' ||
+    restoreChapterIndex < 0 ||
+    texts[restoreChapterIndex] !== undefined ||
+    Boolean(states[restoreChapterIndex]?.error)
+
   useEffect(() => {
-    if (!book || chapters.length === 0 || restoredRef.current) return
+    if (!book || chapters.length === 0 || restoredRef.current || !restoreReady) return
     restoredRef.current = true
     const saved = book.progress
     const chapterIndex = saved
       ? resolveChapterIndex(book.meta, saved.chapterKey, saved.chapterIndex)
       : 0
     const paragraphIndex = saved?.paragraphIndex ?? 0
-    const percent = percentAt(book.meta, chapterIndex, paragraphIndex, paragraphs)
+    const percent = percentFor(chapterIndex, paragraphIndex)
     const next = { chapterIndex, paragraphIndex, percent }
     anchorRef.current = { chapterIndex, paragraphIndex }
     setCurrent(next)
@@ -1052,7 +1139,15 @@ export default function Reader({
         else scrollToPosition(chapterIndex, paragraphIndex)
       })
     })
-  }, [book, chapters.length, paragraphs, scheduleSave, scrollToPosition, goToPosition])
+  }, [
+    book,
+    chapters.length,
+    percentFor,
+    restoreReady,
+    scheduleSave,
+    scrollToPosition,
+    goToPosition
+  ])
 
   // A page is recomputed whenever the chapter, the mode or the typography
   // changes. The anchor paragraph keeps the reading spot across the reflow.
@@ -1171,6 +1266,10 @@ export default function Reader({
 
   const seek = (percent: number): void => {
     if (!book) return
+    if (book.contentMode === 'lazy') {
+      goToPosition(chapterForPercent(book.meta.chapters.length, percent), 0)
+      return
+    }
     const { chapterIndex, paragraphIndex } = positionForPercent(book.meta, percent, paragraphs)
     goToPosition(chapterIndex, paragraphIndex)
   }
@@ -1441,9 +1540,18 @@ export default function Reader({
     return <p className="loading">正在打开…</p>
   }
 
-  const total = totalChars(book.meta)
-  const read = charsBefore(book.meta, current.chapterIndex, current.paragraphIndex, paragraphs)
-  const remainingMinutes = Math.max(0, Math.ceil((total - read) / 400))
+  // 网络书没有真实字数：按每章约 3000 字估算剩余时间。
+  const remainingMinutes =
+    book.contentMode === 'lazy'
+      ? Math.max(0, Math.ceil(((book.meta.chapters.length - current.chapterIndex) * 3000) / 400))
+      : Math.max(
+          0,
+          Math.ceil(
+            (totalChars(book.meta) -
+              charsBefore(book.meta, current.chapterIndex, current.paragraphIndex, paragraphs)) /
+              400
+          )
+        )
 
   return (
     <div
@@ -1552,7 +1660,7 @@ export default function Reader({
               ref={scrollRef}
               onScroll={handleCommentScroll}
             >
-              <ReaderBody chapters={visibleChapters} resizing={resizing} />
+              <ReaderBody chapters={visibleChapters} resizing={resizing} onRetryChapter={retry} />
             </main>
             <div
               className="code-band-handle top"
@@ -1590,7 +1698,7 @@ export default function Reader({
           onScroll={paged ? undefined : handleScroll}
           data-reading-mode={paged ? 'paged' : undefined}
         >
-          <ReaderBody chapters={visibleChapters} resizing={resizing} />
+          <ReaderBody chapters={visibleChapters} resizing={resizing} onRetryChapter={retry} />
         </main>
       )}
 
@@ -1631,6 +1739,7 @@ export default function Reader({
             <SearchPanel
               bookId={bookId}
               chapters={book.meta.chapters}
+              cachedOnly={book.contentMode === 'lazy'}
               onJump={jumpToPosition}
               onClose={() => setDrawer(null)}
             />

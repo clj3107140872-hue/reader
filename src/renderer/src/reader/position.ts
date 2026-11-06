@@ -90,3 +90,20 @@ export function positionForPercent(
 export function resolveChapterIndex(meta: BookMeta, chapterKey: string, fallback: number): number {
   return resolveCoreChapterIndex(meta.chapters, chapterKey, fallback)
 }
+
+/**
+ * Network books do not know real chapter sizes until they are downloaded.
+ * Their progress is measured in chapters: the bar and the seek slider move
+ * one step per chapter instead of pretending a character count.
+ */
+export function percentForChapter(chapterCount: number, chapterIndex: number): number {
+  if (chapterCount <= 0) return 0
+  const index = Math.min(Math.max(chapterIndex, 0), chapterCount - 1)
+  return Math.round((index / chapterCount) * 1000) / 10
+}
+
+export function chapterForPercent(chapterCount: number, percent: number): number {
+  if (chapterCount <= 0) return 0
+  const clamped = Math.min(100, Math.max(0, percent))
+  return Math.min(chapterCount - 1, Math.floor((clamped / 100) * chapterCount))
+}

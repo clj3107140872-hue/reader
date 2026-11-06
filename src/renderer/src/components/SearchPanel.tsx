@@ -6,11 +6,18 @@ import type { SearchHit, SearchProgress } from '../../../shared/api'
 interface SearchPanelProps {
   bookId: string
   chapters: ChapterMeta[]
+  cachedOnly?: boolean
   onJump: (chapterIndex: number, paragraphIndex: number) => void
   onClose: () => void
 }
 
-export default function SearchPanel({ bookId, chapters, onJump, onClose }: SearchPanelProps) {
+export default function SearchPanel({
+  bookId,
+  chapters,
+  cachedOnly = false,
+  onJump,
+  onClose
+}: SearchPanelProps) {
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<SearchHit[]>([])
   const [progress, setProgress] = useState<SearchProgress | null>(null)
@@ -50,8 +57,12 @@ export default function SearchPanel({ bookId, chapters, onJump, onClose }: Searc
       setHits(result.hits)
       setWarnings(result.warnings)
       if (result.cancelled) setMessage('已取消搜索')
-      else if (result.hits.length === 0) setMessage('没有找到匹配内容')
-      else if (result.truncated) setMessage('结果超过 300 条，已截断')
+      else if (result.hits.length === 0) {
+        setMessage(result.cachedOnly ? '已缓存章节里没有找到匹配内容' : '没有找到匹配内容')
+      } else if (result.truncated) setMessage('结果超过 300 条，已截断')
+      else if (result.cachedOnly) {
+        setMessage(`仅搜索已缓存章节，还有 ${result.skippedUncached} 章未缓存`)
+      }
     } catch (reason) {
       if (tokenRef.current === token) {
         setMessage(reason instanceof Error ? reason.message : String(reason))
