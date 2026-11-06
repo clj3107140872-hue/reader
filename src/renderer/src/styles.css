@@ -1672,6 +1672,73 @@ body[data-slacking='code'] { background: #121314; }
   outline-color: rgba(143, 191, 154, 0.3);
 }
 
+/* 书源页与网络搜索页（spec 9.5：网络相关 UI 夜间可见）。
+   这些页面直接写死了浅色背景，夜间块必须逐条覆盖，不依赖阅读页变量。 */
+:root[data-app-theme='night'] .source-settings,
+:root[data-app-theme='night'] .source-row,
+:root[data-app-theme='night'] .network-group {
+  background: #232327;
+  color: #e6e6e9;
+  border-color: #3a3a41;
+}
+:root[data-app-theme='night'] .source-settings h3 { color: #a0a0a8; }
+:root[data-app-theme='night'] .source-settings .setting-check { color: #e6e6e9; }
+:root[data-app-theme='night'] .source-summary { color: #a0a0a8; }
+:root[data-app-theme='night'] .source-title strong,
+:root[data-app-theme='night'] .network-result-title { color: #e6e6e9; }
+:root[data-app-theme='night'] .source-sub,
+:root[data-app-theme='night'] .network-result-author,
+:root[data-app-theme='night'] .network-result-sub,
+:root[data-app-theme='night'] .network-result-intro { color: #a0a0a8; }
+:root[data-app-theme='night'] .source-sub.warn { color: #e0a36a; }
+:root[data-app-theme='night'] .tag { background: #3a3a41; color: #d6d6dc; }
+:root[data-app-theme='night'] .tag.star { color: #e0c07a; }
+:root[data-app-theme='night'] .tag.black { color: #e08b78; }
+:root[data-app-theme='night'] .tag.partial { color: #e0b56a; }
+:root[data-app-theme='night'] .score.good { color: #8fbf9a; }
+:root[data-app-theme='night'] .score.mid { color: #e0b56a; }
+:root[data-app-theme='night'] .score.bad { color: #e08b78; }
+:root[data-app-theme='night'] .source-actions button,
+:root[data-app-theme='night'] .tabs button,
+:root[data-app-theme='night'] .network-search-bar button,
+:root[data-app-theme='night'] .network-scope,
+:root[data-app-theme='night'] .network-add,
+:root[data-app-theme='night'] .network-others {
+  background: #2b2b30;
+  color: #e6e6e9;
+  border-color: #3a3a41;
+}
+:root[data-app-theme='night'] .network-search-bar input {
+  background: #2b2b30;
+  color: #e6e6e9;
+  border-color: #3a3a41;
+}
+:root[data-app-theme='night'] .tabs button.active {
+  background: #4a6741;
+  border-color: #4a6741;
+  color: #fff;
+}
+:root[data-app-theme='night'] .source-actions button.ghost {
+  background: transparent;
+  color: #8fbf9a;
+  border-color: #3a3a41;
+}
+:root[data-app-theme='night'] .source-actions button.danger {
+  background: transparent;
+  color: #e08b78;
+  border-color: #6b3a32;
+}
+:root[data-app-theme='night'] .network-result { border-color: #3a3a41; }
+:root[data-app-theme='night'] .network-badge { color: #a0a0a8; }
+:root[data-app-theme='night'] .network-badge-source {
+  background: color-mix(in srgb, #8fbf9a 18%, transparent);
+  color: #a8d4b0;
+}
+:root[data-app-theme='night'] .network-badge.missing .network-badge-source {
+  background: color-mix(in srgb, #e08b78 18%, transparent);
+  color: #e08b78;
+}
+
 /* 翻页模式：一章排成若干等宽栏，每栏是一页，横向翻动。
    栏宽取页面自身宽度（column-width 足够大时只剩一栏），所以只需要设置
    页眉页脚之外的可用高度，浏览器自己完成断行与分页。 */
@@ -1705,6 +1772,20 @@ body[data-slacking='code'] { background: #121314; }
   --paged-gap: 18px;
 }
 
+.source-summary { color: #6b6b6b; font-size: 12px; }
+.source-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  margin: 0 16px 12px;
+  padding: 10px 14px;
+  border: 1px solid #e2ddd2;
+  border-radius: 10px;
+  background: #fff;
+}
+.source-settings h3 { margin: 0; font-size: 13px; color: #6b6b6b; font-weight: 500; }
+.source-settings .setting-check { margin: 0; color: #2b2b2b; }
 .source-list { display: grid; gap: 10px; padding: 16px; overflow: auto; }
 .source-row { display: flex; gap: 16px; justify-content: space-between; padding: 12px 14px; border: 1px solid #e2ddd2; border-radius: 10px; background: #fff; }
 .source-row.disabled { opacity: 0.6; }
@@ -1746,6 +1827,8 @@ body[data-slacking='code'] { background: #121314; }
   cursor: pointer;
 }
 .network-search-bar button:disabled { opacity: 0.55; cursor: default; }
+.network-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 16px; }
+.network-notice .hint { margin: 6px 0; }
 .network-results { display: grid; gap: 10px; padding: 0 16px 24px; overflow: auto; }
 .network-group { border: 1px solid #e2ddd2; border-radius: 10px; background: #fff; padding: 10px; }
 .network-result { display: flex; gap: 12px; justify-content: space-between; padding: 8px 4px; border-top: 1px solid #e2ddd2; }
