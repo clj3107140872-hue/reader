@@ -77,7 +77,12 @@ export class NetworkBookService {
   private readonly converting = new Set<string>()
   private readonly downloadJobs = new Map<
     string,
-    { controller: AbortController; done: Promise<unknown> }
+    {
+      controller: AbortController
+      done: Promise<unknown>
+      /** 书源被删除/停用时记录原因，用于把剩余章节记为失败。 */
+      reason?: 'source-deleted' | 'source-disabled'
+    }
   >()
 
   constructor(deps: NetworkBookDeps) {
@@ -481,6 +486,22 @@ export class NetworkBookService {
       })
       await Promise.all(workers)
 
+      // spec 8.3：书源在下载途中被删除或停用，剩余章节记为失败并结束，
+      // 已缓存章节保留。这种中止不算用户取消。
+      const reason = this.downloadJobs.get(id)?.reason
+      if (reason) {
+        const cachedNow = new Set(await this.networkBooks.listCachedChapters(id))
+        const failedIndexes = new Set(failedChapters.map((item) => item.index))
+        for (const chapter of todo) {
+          if (cachedNow.has(chapter.index) || failedIndexes.has(chapter.index)) continue
+          failedChapters.push({
+            index: chapter.index,
+            title: chapter.title,
+            message: reason === 'source-deleted' ? '书源已删除' : '书源已停用'
+          })
+        }
+      }
+
       const cache = await this.cacheInfo(id, meta)
       const state = downloadState(cache.cached, cache.total)
       await this.library.update(id, {
@@ -497,7 +518,7 @@ export class NetworkBookService {
         done,
         total: pending.length,
         failedChapters,
-        cancelled: controller.signal.aborted
+        cancelled: controller.signal.aborted && !reason
       }
     })
   }
@@ -522,9 +543,11 @@ export class NetworkBookService {
     return entry
   }
 
-  cancelBookTasks(id: string): void {
+  cancelBookTasks(id: string, reason?: 'source-deleted' | 'source-disabled'): void {
     const job = this.downloadJobs.get(id)
-    if (job) job.controller.abort()
+    if (!job) return
+    if (reason) job.reason = reason
+    job.controller.abort()
   }
 
   async relinkSources(): Promise<void> {

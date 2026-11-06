@@ -1,5 +1,14 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { BackdropTone, ReaderApi, SearchProgress } from '../shared/api'
+import type { DownloadDone, DownloadProgress } from '../core/booksource/model'
+import type {
+  BackdropTone,
+  NetworkSearchDone,
+  NetworkSearchPayload,
+  NetworkSearchSourceEvent,
+  ReaderApi,
+  SearchProgress
+} from '../shared/api'
+import { INVOKE_CHANNELS } from './channels'
 
 const api: ReaderApi = {
   ping: () => ipcRenderer.invoke('app:ping'),
@@ -83,7 +92,59 @@ const api: ReaderApi = {
   },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
-  toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen')
+  toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen'),
+  sourceList: () => ipcRenderer.invoke(INVOKE_CHANNELS.sourceList),
+  importSources: (request) => ipcRenderer.invoke(INVOKE_CHANNELS.importSources, request),
+  setSourceFlags: (id, flags) => ipcRenderer.invoke(INVOKE_CHANNELS.setSourceFlags, id, flags),
+  sourceRaw: (id) => ipcRenderer.invoke(INVOKE_CHANNELS.sourceRaw, id),
+  deleteSource: (id) => ipcRenderer.invoke(INVOKE_CHANNELS.deleteSource, id),
+  searchNetwork: (request) => ipcRenderer.invoke(INVOKE_CHANNELS.searchNetwork, request),
+  cancelNetworkSearch: (requestId) =>
+    ipcRenderer.invoke(INVOKE_CHANNELS.cancelNetworkSearch, requestId),
+  addNetworkBook: (input) => ipcRenderer.invoke(INVOKE_CHANNELS.addNetworkBook, input),
+  updateToc: (id) => ipcRenderer.invoke(INVOKE_CHANNELS.updateToc, id),
+  downloadAll: (id) => ipcRenderer.invoke(INVOKE_CHANNELS.downloadAll, id),
+  cancelDownload: (id) => ipcRenderer.invoke(INVOKE_CHANNELS.cancelDownload, id),
+  readNetworkChapter: (id, index) =>
+    ipcRenderer.invoke(INVOKE_CHANNELS.readNetworkChapter, id, index),
+  convertToLocal: (id) => ipcRenderer.invoke(INVOKE_CHANNELS.convertToLocal, id),
+  onNetworkSearchSource: (callback) => {
+    const listener = (_e: unknown, payload: NetworkSearchSourceEvent): void => callback(payload)
+    ipcRenderer.on('network:search-source', listener)
+    return () => ipcRenderer.removeListener('network:search-source', listener)
+  },
+  onNetworkSearchResults: (callback) => {
+    const listener = (_e: unknown, payload: NetworkSearchPayload): void => callback(payload)
+    ipcRenderer.on('network:search-results', listener)
+    return () => ipcRenderer.removeListener('network:search-results', listener)
+  },
+  onNetworkSearchDone: (callback) => {
+    const listener = (_e: unknown, payload: NetworkSearchDone): void => callback(payload)
+    ipcRenderer.on('network:search-done', listener)
+    return () => ipcRenderer.removeListener('network:search-done', listener)
+  },
+  onNetworkSearchError: (callback) => {
+    const listener = (_e: unknown, payload: { requestId: string; message: string }): void =>
+      callback(payload)
+    ipcRenderer.on('network:search-error', listener)
+    return () => ipcRenderer.removeListener('network:search-error', listener)
+  },
+  onDownloadProgress: (callback) => {
+    const listener = (_e: unknown, payload: DownloadProgress): void => callback(payload)
+    ipcRenderer.on('network:download-progress', listener)
+    return () => ipcRenderer.removeListener('network:download-progress', listener)
+  },
+  onDownloadDone: (callback) => {
+    const listener = (_e: unknown, payload: DownloadDone): void => callback(payload)
+    ipcRenderer.on('network:download-done', listener)
+    return () => ipcRenderer.removeListener('network:download-done', listener)
+  },
+  onBookTocUpdated: (callback) => {
+    const listener = (_e: unknown, payload: { id: string; added: number; total: number }): void =>
+      callback(payload)
+    ipcRenderer.on('network:toc-updated', listener)
+    return () => ipcRenderer.removeListener('network:toc-updated', listener)
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

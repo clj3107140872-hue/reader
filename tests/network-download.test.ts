@@ -103,6 +103,19 @@ describe('NetworkBookService downloads', () => {
     expect((await service.networkCacheOf(entry.id)).cached).toBe(2)
   })
 
+  it('marks remaining chapters failed when the source disappears mid-download', async () => {
+    const { service, server } = await setup()
+    const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })
+    const running = service.downloadAll(entry.id, () => {})
+    // KeyedLocks schedules the download body on a microtask, so the abort lands before any chapter starts.
+    service.cancelBookTasks(entry.id, 'source-deleted')
+    const done = await running
+    expect(done.cancelled).toBe(false)
+    expect(done.failedChapters).toHaveLength(2)
+    expect(done.failedChapters.every((item) => item.message === '书源已删除')).toBe(true)
+    expect((await service.networkCacheOf(entry.id)).cached).toBe(0)
+  })
+
   it('keeps state partial when some chapters fail', async () => {
     const { service, server } = await setup()
     const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })

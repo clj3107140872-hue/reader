@@ -344,4 +344,30 @@ export interface ReaderApi {
   getSettings(): Promise<AppSettings>
   updateSettings(patch: SettingsPatch): Promise<AppSettings>
   toggleFullscreen(): Promise<boolean>
+
+  sourceList(): Promise<SourceListItem[]>
+  importSources(request: SourceImportRequest): Promise<ImportSourcesResult>
+  setSourceFlags(
+    id: string,
+    flags: { enabled?: boolean; starred?: boolean; blacklisted?: boolean }
+  ): Promise<SourceListItem[]>
+  sourceRaw(id: string): Promise<Record<string, unknown> | null>
+  deleteSource(id: string): Promise<void>
+
+  searchNetwork(request: NetworkSearchRequest): Promise<NetworkSearchDone>
+  cancelNetworkSearch(requestId: string): Promise<void>
+  addNetworkBook(input: AddNetworkBookInput): Promise<LibraryEntry>
+  updateToc(id: string): Promise<UpdateTocResult>
+  downloadAll(id: string): Promise<DownloadDone>
+  cancelDownload(id: string): Promise<void>
+  readNetworkChapter(id: string, index: number): Promise<NetworkChapterPayload>
+  convertToLocal(id: string): Promise<ConvertToLocalResult>
+
+  onNetworkSearchSource(cb: (payload: NetworkSearchSourceEvent) => void): () => void
+  onNetworkSearchResults(cb: (payload: NetworkSearchPayload) => void): () => void
+  onNetworkSearchDone(cb: (payload: NetworkSearchDone) => void): () => void
+  onNetworkSearchError(cb: (payload: { requestId: string; message: string }) => void): () => void
+  onDownloadProgress(cb: (payload: DownloadProgress) => void): () => void
+  onDownloadDone(cb: (payload: DownloadDone) => void): () => void
+  onBookTocUpdated(cb: (payload: { id: string; added: number; total: number }) => void): () => void
 }

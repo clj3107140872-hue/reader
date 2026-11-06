@@ -9,10 +9,18 @@ import {
   screen
 } from 'electron'
 import type { MessageBoxOptions, OpenDialogOptions, Rectangle, WebContents } from 'electron'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AppSettings, BookProgress } from '../core/model'
 import type { SupportedEncoding } from '../shared/encodings'
-import type { CleaningConfig, NewBookmark, StartupNotice } from '../shared/api'
+import type {
+  AddNetworkBookInput,
+  CleaningConfig,
+  NetworkSearchRequest,
+  NewBookmark,
+  SourceImportRequest,
+  StartupNotice
+} from '../shared/api'
 import type { SettingsPatch } from '../shared/settings'
 import { disguiseWindowKind } from '../shared/settings'
 import { isDarkBitmap } from './services/backdrop'
@@ -23,6 +31,12 @@ import { formatFileSize, ImportQueue } from './services/importQueue'
 import { LibraryService } from './services/library'
 import { Logger } from './services/logger'
 import { MergeService } from './services/merge'
+import { NetworkBookService } from './services/network/bookService'
+import { HttpClient } from './services/network/httpClient'
+import { NetworkSearchService } from './services/network/searchService'
+import { SourceReader } from './services/network/sourceReader'
+import { SourceService } from './services/network/sourceService'
+import { SourceStore } from './services/network/sourceStore'
 import { resolveDataDir } from './services/paths'
 import { ReaderService } from './services/reader'
 import { ReprocessService } from './services/reprocess'
@@ -31,6 +45,7 @@ import { resizeBounds, sameBounds } from './services/windowResize'
 import type { WindowResizeEdge } from './services/windowResize'
 import { BookRepository } from './storage/book'
 import { LibraryRepository } from './storage/library'
+import { NetworkBookRepository } from './storage/networkBook'
 import { RuleRepository } from './storage/rules'
 import { SettingsRepository } from './storage/settings'
 import { clampWindowState } from './windowBounds'
@@ -81,9 +96,27 @@ const books = new BookRepository(dataDir)
 const settingsRepo = new SettingsRepository(dataDir)
 const rulesRepo = new RuleRepository(dataDir)
 const cleaning = new CleaningService(settingsRepo, rulesRepo, library, books)
+const networkBooks = new NetworkBookRepository(dataDir)
+const networkHttp = new HttpClient()
+const sourceStore = new SourceStore(dataDir)
+const sourceService = new SourceService(sourceStore, networkHttp, library)
+const sourceReader = new SourceReader(networkHttp)
+const networkBookService = new NetworkBookService({
+  root: dataDir,
+  sources: sourceService,
+  reader: sourceReader,
+  networkBooks,
+  books,
+  library,
+  cleaning: () => cleaning.currentRunConfig(),
+  // 关闭联网后，加入书架/更新目录/下载/拉未缓存章节都在服务层被拒绝；
+  // 已缓存章节仍然可读（readChapter 先查缓存再过这个门）。
+  allowNetwork: () => settingsRepo.readSync().network.enabled
+})
+const networkSearch = new NetworkSearchService(sourceService, sourceStore, sourceReader, library)
 const importer = new ImportService(library, books, () => cleaning.currentRunConfig())
-const reader = new ReaderService(library, books)
-const search = new SearchService(books)
+const reader = new ReaderService(library, books, networkBooks)
+const search = new SearchService(books, networkBooks)
 const merger = new MergeService(library, books)
 const libraryService = new LibraryService(library, books)
 const reprocess = new ReprocessService(library, books, () => cleaning.currentRunConfig())
@@ -515,6 +548,8 @@ if (hasSingleInstanceLock) {
     const repair = await library.repair()
     startupNotice = { libraryRestored: repair.restored }
     if (repair.restored) logger.info('library.json restored from backup')
+    const sourcesRestored = await sourceService.repair()
+    if (sourcesRestored) logger.info('sources.json restored from backup')
     logger.info(
       `app start version=${app.getVersion()} packaged=${app.isPackaged} data=${dataDir}`
     )
@@ -627,6 +662,141 @@ if (hasSingleInstanceLock) {
       }
     })
     ipcMain.handle('library:list', () => library.list())
+    // 关闭联网后，需要访问网络的入口在进程内拒绝；缓存阅读和本地导入不受影响。
+    const assertNetworkEnabled = (): void => {
+      if (!settingsRepo.readSync().network.enabled) {
+        throw new Error('已关闭联网功能，请到设置里打开后再搜索/更新/下载')
+      }
+    }
+    // 书源被删除或停用时，把这本书正在跑的下载任务标记结束原因，剩余章节
+    // 由下载服务记为失败；已经缓存的章节保留。
+    const cancelSourceTasks = async (
+      sourceId: string,
+      reason: 'source-deleted' | 'source-disabled'
+    ): Promise<void> => {
+      for (const entry of await library.list()) {
+        if (entry.format === 'network' && entry.sourceId === sourceId) {
+          networkBookService.cancelBookTasks(entry.id, reason)
+        }
+      }
+    }
+    ipcMain.handle('source:list', () => sourceService.list())
+    ipcMain.handle('source:import', async (event, request: SourceImportRequest) => {
+      if (request.kind === 'json') {
+        const result = await sourceService.importJson(request.json, request.dryRun)
+        await networkBookService.relinkSources()
+        return result
+      }
+      if (request.kind === 'url') {
+        assertNetworkEnabled()
+        const result = await sourceService.importUrl(request.url)
+        await networkBookService.relinkSources()
+        return result
+      }
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const options: OpenDialogOptions = {
+        properties: ['openFile'],
+        filters: [{ name: '书源 JSON', extensions: ['json', 'txt'] }]
+      }
+      const selection = win
+        ? await dialog.showOpenDialog(win, options)
+        : await dialog.showOpenDialog(options)
+      if (selection.canceled || selection.filePaths.length === 0) {
+        return { added: 0, updated: 0, rejected: [], warnings: ['已取消'] }
+      }
+      const text = await readFile(selection.filePaths[0], 'utf8')
+      const result = await sourceService.importJson(text, request.dryRun)
+      await networkBookService.relinkSources()
+      return result
+    })
+    ipcMain.handle('source:flags', async (_event, id: unknown, flags: unknown) => {
+      if (typeof id !== 'string' || !flags || typeof flags !== 'object') {
+        throw new Error('无效的书源参数')
+      }
+      const result = await sourceService.setFlags(
+        id,
+        flags as { enabled?: boolean; starred?: boolean; blacklisted?: boolean }
+      )
+      if ((flags as { enabled?: unknown }).enabled === false) {
+        await cancelSourceTasks(id, 'source-disabled')
+      }
+      return result
+    })
+    ipcMain.handle('source:raw', (_event, id: unknown) =>
+      typeof id === 'string' ? sourceService.raw(id) : Promise.reject(new Error('无效的书源编号'))
+    )
+    ipcMain.handle('source:delete', async (_event, id: unknown) => {
+      if (typeof id !== 'string') throw new Error('无效的书源编号')
+      await cancelSourceTasks(id, 'source-deleted')
+      await sourceService.remove(id)
+    })
+    ipcMain.handle('network:search', (event, request: NetworkSearchRequest) => {
+      assertNetworkEnabled()
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const send = (channel: string, payload: unknown): void => {
+        if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+      }
+      return networkSearch
+        .search(request, {
+          source: (payload) => send('network:search-source', payload),
+          results: (payload) =>
+            send('network:search-results', {
+              requestId: request.requestId,
+              ...payload,
+              scope: request.scope
+            })
+        })
+        .then((done) => {
+          send('network:search-done', done)
+          return done
+        })
+        .catch((reason) => {
+          send('network:search-error', {
+            requestId: request.requestId,
+            message: reason instanceof Error ? reason.message : '搜索失败'
+          })
+          throw reason
+        })
+    })
+    ipcMain.handle('network:search-cancel', (_event, requestId: string) => {
+      networkSearch.cancel(requestId)
+    })
+    ipcMain.handle('network:add-book', (_event, input: AddNetworkBookInput) =>
+      networkBookService.add(input)
+    )
+    ipcMain.handle('network:update-toc', (event, id: string) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      return networkBookService.updateToc(id).then((result) => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('network:toc-updated', {
+            id,
+            added: result.added,
+            total: result.total
+          })
+        }
+        return result
+      })
+    })
+    ipcMain.handle('network:download-all', (event, id: string) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      return networkBookService
+        .downloadAll(id, (payload) => {
+          if (win && !win.isDestroyed()) win.webContents.send('network:download-progress', payload)
+        })
+        .then((result) => {
+          if (win && !win.isDestroyed()) win.webContents.send('network:download-done', result)
+          return result
+        })
+    })
+    ipcMain.handle('network:download-cancel', (_event, id: string) => {
+      networkBookService.cancelDownload(id)
+    })
+    ipcMain.handle('network:read-chapter', (_event, id: string, index: number) =>
+      networkBookService.readChapter(id, index)
+    )
+    ipcMain.handle('network:convert', (_event, id: string) =>
+      networkBookService.convertToLocal(id)
+    )
     ipcMain.handle('book:cover', async (_event, id: unknown) => {
       if (typeof id !== 'string') return null
       const cover = await books.readCover(id)
@@ -685,7 +855,10 @@ if (hasSingleInstanceLock) {
     ipcMain.handle('import:resolve', (_event, targetId: string, sourceId: string) =>
       merger.merge(targetId, sourceId)
     )
-    ipcMain.handle('library:remove', (_event, id: string) => libraryService.remove(id))
+    ipcMain.handle('library:remove', async (_event, id: string) => {
+      networkBookService.cancelBookTasks(id)
+      await libraryService.remove(id)
+    })
     ipcMain.handle('backup:list', (_event, id: unknown) =>
       typeof id === 'string' ? backup.list(id) : Promise.reject(new Error('无效的书籍编号'))
     )
@@ -784,6 +957,7 @@ if (hasSingleInstanceLock) {
   app.on('will-quit', () => {
     stopBackdropSampling()
     globalShortcut.unregisterAll()
+    void sourceStore.flush()
   })
 
   app.on('window-all-closed', () => {
