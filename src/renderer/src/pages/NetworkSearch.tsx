@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { NetworkSearchGroup, NetworkSearchItem } from '../../../core/booksource/model'
-import type { NetworkSearchPayload } from '../../../shared/api'
+import type { NetworkSearchDone, NetworkSearchPayload } from '../../../shared/api'
 import { errorText } from '../errors'
 
 export function NetworkSearchGroupView({
@@ -70,6 +70,32 @@ export function NetworkSearchGroupView({
   )
 }
 
+/** 搜索完成后的提示与动作状态；单独导出以便按完成计数做行为测试。 */
+export function searchDoneNotice(
+  done: NetworkSearchDone,
+  scope: 'quality' | 'all'
+): { message: string; failed: boolean; cancelled: boolean } {
+  if (done.cancelled) return { message: '已取消搜索', failed: false, cancelled: true }
+  const failed =
+    done.searched > 0 && done.succeeded === 0 && done.empty === 0 && done.failed > 0
+  if (failed) {
+    return {
+      message: `搜索失败：${done.failed} 个书源都没有返回结果，请检查网络后重试`,
+      failed: true,
+      cancelled: false
+    }
+  }
+  if (done.groups.length === 0) {
+    return {
+      message:
+        scope === 'all' ? '没有找到这本书' : '没有找到这本书，可以换全量书源再试',
+      failed: false,
+      cancelled: false
+    }
+  }
+  return { message: '', failed: false, cancelled: false }
+}
+
 export function NetworkSearchNotice({
   message,
   retry,
@@ -121,6 +147,7 @@ export default function NetworkSearch({
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [searching, setSearching] = useState(false)
   const [searchFailed, setSearchFailed] = useState(false)
+  const [searchCancelled, setSearchCancelled] = useState(false)
   const [adding, setAdding] = useState<string | null>(null)
   const [message, setMessage] = useState('')
   const [toast, setToast] = useState('')
@@ -144,13 +171,10 @@ export default function NetworkSearch({
     const offDone = window.api.onNetworkSearchDone((done) => {
       if (done.requestId !== requestRef.current) return
       setSearching(false)
-      const allFailed =
-        !done.cancelled &&
-        done.searched > 0 &&
-        done.succeeded === 0 &&
-        done.empty === 0 &&
-        done.failed > 0
-      setSearchFailed(allFailed)
+      const outcome = searchDoneNotice(done, scopeRef.current)
+      setSearchFailed(outcome.failed)
+      setSearchCancelled(outcome.cancelled)
+      if (outcome.message) setMessage(outcome.message)
       setPayload((current) =>
         current
           ? {
@@ -173,12 +197,6 @@ export default function NetworkSearch({
               scope: scopeRef.current
             }
       )
-      if (done.cancelled) setMessage('已取消搜索')
-      else if (allFailed) {
-        setMessage(`搜索失败：${done.failed} 个书源都没有返回结果，请检查网络后重试`)
-      } else if (done.groups.length === 0) {
-        setMessage('没有找到这本书，可以换全量书源再试')
-      }
     })
     const offError = window.api.onNetworkSearchError((event) => {
       if (event.requestId !== requestRef.current) return
@@ -208,6 +226,7 @@ export default function NetworkSearch({
     setScope(nextScope)
     setSearching(true)
     setSearchFailed(false)
+    setSearchCancelled(false)
     setPayload(null)
     setSourceEvents({})
     setExpanded(new Set())
@@ -281,6 +300,7 @@ export default function NetworkSearch({
         searchAll={
           !searching &&
           !searchFailed &&
+          !searchCancelled &&
           !!payload &&
           payload.scope === 'quality' &&
           payload.groups.length === 0

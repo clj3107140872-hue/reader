@@ -47,6 +47,7 @@ const KNOWN_MESSAGES = [
   '书源文件超过 5 MB，无法导入',
   '单次最多导入 500 个书源',
   '链接内容超过 5 MB',
+  '书源链接',
   '只支持 http(s) 链接或 legado:// 分享链接',
   '只支持书源分享链接（legado://import/bookSource）',
   '分享链接格式不正确',

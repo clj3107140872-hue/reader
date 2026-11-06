@@ -109,4 +109,29 @@ describe('SourceService', () => {
       sourceService.importUrl('legado://import/bookSource?src=file%3A%2F%2F%2Fetc%2Fpasswd')
     ).rejects.toThrow('http')
   })
+
+  it('maps a failed link import to Chinese copy instead of the raw HTTP status', async () => {
+    const server = await startFakeServer((_req, res) => {
+      res.writeHead(404)
+      res.end()
+    })
+    close = server.close
+    const sourceService = service()
+    const message = await sourceService
+      .importUrl(`${server.url}/source.json`)
+      .catch((error: Error) => error.message)
+    expect(message).toContain('书源链接')
+    expect(message).toContain('页面不存在')
+    expect(message).not.toContain('HTTP')
+  })
+
+  it('maps a network failure during a link import to Chinese copy', async () => {
+    const server = await startFakeServer((_req, res) => res.end())
+    const deadUrl = `${server.url}/source.json`
+    await server.close()
+    const sourceService = service()
+    const message = await sourceService.importUrl(deadUrl).catch((error: Error) => error.message)
+    expect(message).toMatch(/[㐀-鿿]/)
+    expect(message).not.toContain('HTTP')
+  })
 })

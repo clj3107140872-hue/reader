@@ -7,6 +7,7 @@ import { parseHeader, parseSourceJson, parseSourceValue } from '../../../core/bo
 import { resolveSourceImportUrl } from '../../../core/booksource/legado'
 import type { ParsedSource } from '../../../core/booksource/legado'
 import type { LibraryRepository } from '../../storage/library'
+import { userFacingNetworkError } from './errors'
 import { NetworkError } from './httpClient'
 import type { HttpClient } from './httpClient'
 import type { OperationOutcome, SourceOperation, SourceStore } from './sourceStore'
@@ -106,7 +107,9 @@ export class SourceService {
       if (error instanceof NetworkError && error.kind === 'too-large') {
         throw new Error('链接内容超过 5 MB')
       }
-      throw error
+      // 导入链接没有书源名可用；统一成中文文案，避免 HTTP 404 之类的裸英文
+      // 或底层网络错误直接露给用户。
+      throw new Error(userFacingNetworkError(error, '', '书源链接'))
     }
     return this.importJson(response.text)
   }

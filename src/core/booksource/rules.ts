@@ -287,8 +287,10 @@ function evaluateSegment(parts: SegmentParts, doc: RuleDocument): { values: stri
         warnings.push(`正则无效：${parts.pattern}`)
       }
     }
-  } catch (error) {
-    warnings.push(error instanceof Error ? error.message : '规则求值失败')
+  } catch {
+    // 求值器（如 JSONPath）会抛出英文错误；警告会进入用户可见的加入提示，
+    // 所以只保留中文说明，不转发原始错误文本。
+    warnings.push('规则求值失败')
     values = []
   }
   return { values, warnings }
