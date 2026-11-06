@@ -4,8 +4,9 @@
 
 const { spawn, execFileSync } = require('node:child_process')
 const { createServer } = require('node:http')
+const { connect: connectTcp } = require('node:net')
 const { createWriteStream } = require('node:fs')
-const { mkdtemp, rm } = require('node:fs/promises')
+const { mkdtemp, readFile, rm } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 
@@ -56,10 +57,56 @@ function startFakeSource() {
       const address = server.address()
       resolve({
         url: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((done) => server.close(done))
+        close: () =>
+          new Promise((done) => {
+            // 渲染进程假死时 keep-alive 连接会让 close() 一直等下去；先断开
+            // 现有连接，再给关闭本身加超时兜底。
+            let settled = false
+            const finish = () => {
+              if (settled) return
+              settled = true
+              clearTimeout(timer)
+              done()
+            }
+            const timer = setTimeout(finish, 5000)
+            timer.unref?.()
+            try {
+              server.closeAllConnections?.()
+            } catch {
+              // 老版本 Node 没有这个方法。
+            }
+            server.close(() => finish())
+          })
       })
     })
   })
+}
+
+/** Any successful TCP connect means the debugging port is already taken. */
+function portInUse(port, timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    let settled = false
+    const socket = connectTcp({ host: '127.0.0.1', port })
+    const finish = (value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      socket.destroy()
+      resolve(value)
+    }
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    socket.once('connect', () => finish(true))
+    socket.once('error', () => finish(false))
+  })
+}
+
+async function tailLog(logPath, lines = 20) {
+  try {
+    const text = await readFile(logPath, 'utf8')
+    return text.split(/\r?\n/).slice(-lines).join('\n')
+  } catch {
+    return ''
+  }
 }
 
 async function currentTarget() {
@@ -69,25 +116,86 @@ async function currentTarget() {
   return list.find((target) => target.type === 'page') ?? null
 }
 
-async function waitForApp(timeoutMs = 120000) {
+async function waitForApp({ child, logPath, timeoutMs = 120000 }) {
+  let exit = null
+  const onExit = (code, signal) => {
+    exit = { code, signal }
+  }
+  child.once('exit', onExit)
   const deadline = Date.now() + timeoutMs
+  try {
+    while (Date.now() < deadline) {
+      if (exit) {
+        throw new Error(
+          `开发进程提前退出（code=${exit.code} signal=${exit.signal}），日志末尾：\n${await tailLog(logPath)}`
+        )
+      }
+      let text = ''
+      try {
+        text = await readFile(logPath, 'utf8')
+      } catch {
+        // 日志文件还没建好。
+      }
+      // 本进程自己的 Electron 抢不到 9222 时才会出现这一行；另一个实例
+      // 占着端口时，绝不能把我们的假书源写进它的真实数据目录。
+      if (text.includes('Cannot start http server for devtools')) {
+        throw new Error(`9222 调试端口被其他实例占用，本次启动未能接管，日志末尾：\n${await tailLog(logPath)}`)
+      }
+      // 只有本进程的 Electron 真正在 9222 上启动调试服务后，才去取页面
+      // 目标；否则可能连到别的开发实例。
+      if (text.includes('DevTools listening on ws://127.0.0.1:9222/')) {
+        const target = await currentTarget().catch(() => null)
+        if (target) return target
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+  } finally {
+    child.removeListener('exit', onExit)
+  }
+  throw new Error(`开发窗口在 ${timeoutMs / 1000} 秒内没有打开 9222 调试端口`)
+}
+
+/**
+ * The main process logs its resolved data dir at startup. Asserting it points
+ * at the temp directory proves a regression in env handling cannot silently
+ * write the fake source or book into the real `data/`.
+ */
+async function assertTempDataDir(tempDir, timeoutMs = 15000) {
+  const expected = join(tempDir, 'data')
+  const appLog = join(expected, 'logs', 'app.log')
+  const deadline = Date.now() + timeoutMs
+  let text = ''
   while (Date.now() < deadline) {
     try {
-      const target = await currentTarget()
-      if (target) return target
+      text = await readFile(appLog, 'utf8')
     } catch {
-      // 还没起来。
+      text = ''
     }
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    if (text.includes(`data=${expected}`)) return
+    await new Promise((resolve) => setTimeout(resolve, 300))
   }
-  throw new Error('开发窗口在 120 秒内没有打开 9222 调试端口')
+  throw new Error(`应用没有使用临时数据目录：${appLog} 里没有 data=${expected}`)
 }
 
 async function connect(target) {
   const ws = new WebSocket(target.webSocketDebuggerUrl)
   await new Promise((resolve, reject) => {
-    ws.onopen = resolve
-    ws.onerror = reject
+    const timer = setTimeout(() => {
+      try {
+        ws.close()
+      } catch {
+        // 连接还没建立。
+      }
+      reject(new Error('CDP WebSocket 握手超时'))
+    }, 10000)
+    ws.onopen = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    ws.onerror = (event) => {
+      clearTimeout(timer)
+      reject(new Error(`CDP WebSocket 连接失败：${event?.message ?? '未知错误'}`))
+    }
   })
   let nextId = 0
   const send = (method, params) =>
@@ -197,23 +305,29 @@ async function stopApp(child) {
 }
 
 async function main() {
-  if (await currentTarget().catch(() => null)) {
-    throw new Error('9222 已有实例在运行，先关闭开发实例再跑验收')
+  // 任何 TCP 响应都视为 9222 已被占用：只要端口有监听，开发应用就绑不上；
+  // 也不能冒险连到别的实例，把假书源写进它的真实 data/。
+  if (await portInUse(9222)) {
+    throw new Error('9222 已有实例在运行（端口有响应），先关闭开发实例再跑验收')
   }
-  const tempDir = await mkdtemp(join(tmpdir(), 'reader-acceptance-network-'))
-  const logPath = join(tempDir, 'dev.log')
-  const log = createWriteStream(logPath)
-  const fake = await startFakeSource()
+  let tempDir = null
+  let log = null
   let child = null
   let page = null
+  let fake = null
   try {
+    tempDir = await mkdtemp(join(tmpdir(), 'reader-acceptance-network-'))
+    const logPath = join(tempDir, 'dev.log')
+    log = createWriteStream(logPath)
+    fake = await startFakeSource()
+
     const env = { ...process.env }
     delete env.ELECTRON_RUN_AS_NODE
     env.READER_ACCEPTANCE = '1'
     env.PORTABLE_EXECUTABLE_DIR = tempDir
     // 仅验收脚本为 127.0.0.1 假书源放行；生产代码仍然只允许 http(s) 公网地址。
     env.READER_ALLOW_LOCAL_SOURCES = '1'
-    child = spawn('npm', ['run', 'dev'], {
+    child = spawn('npm run dev', {
       cwd: ROOT,
       env,
       shell: true,
@@ -222,7 +336,9 @@ async function main() {
     child.stdout.pipe(log)
     child.stderr.pipe(log)
 
-    page = await connect(await waitForApp())
+    page = await connect(await waitForApp({ child, logPath }))
+    // 证明应用确实用了临时数据目录，绝没有碰仓库里真实的 data/。
+    await assertTempDataDir(tempDir)
     await waitFor(page, "!!document.querySelector('.toolbar')", '书架没有加载')
 
     const imported = await page.evaluate(
@@ -344,14 +460,24 @@ async function main() {
     }
     page?.close()
     if (child) await stopApp(child)
-    await fake.close()
-    log.end()
-    for (let attempt = 0; attempt < 3; attempt++) {
+    if (fake) {
       try {
-        await rm(tempDir, { recursive: true, force: true })
-        break
+        await fake.close()
       } catch {
-        await new Promise((resolve) => setTimeout(resolve, 1000))
+        // 假书源可能已经关闭。
+      }
+    }
+    if (log) {
+      await new Promise((resolve) => log.end(resolve))
+    }
+    if (tempDir) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await rm(tempDir, { recursive: true, force: true })
+          break
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+        }
       }
     }
   }
