@@ -95,6 +95,9 @@ export class NetworkSearchService {
         try {
           const source = await this.sources.require(item.id)
           const page = await this.reader.search(source, keyword, 1, job.controller.signal)
+          // A retried fetch can resolve after cancellation; drop its results
+          // instead of recording a success for a search the user cancelled.
+          if (job.cancelled) return
           const results = page.slice(0, PER_SOURCE_LIMIT).map((entry) => ({
             sourceId: item.id,
             sourceName: item.name,

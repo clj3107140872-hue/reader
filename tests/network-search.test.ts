@@ -58,5 +58,6 @@ describe('NetworkSearchService', () => {
     const cancelled = await running
     expect(cancelled.cancelled).toBe(true)
     expect(cancelled.failed).toBe(0)
+    expect(cancelled.groups).toHaveLength(0)
   })
 })
