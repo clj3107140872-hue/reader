@@ -650,20 +650,27 @@ export default function Library({
     setDialog({ kind: 'convert', entry })
   }
 
+  const closeConvert = (): void => {
+    if (actionBusy) return
+    setConvertNext(null)
+    setDialog(null)
+  }
+
   const confirmConvert = async (entry: LibraryEntry): Promise<void> => {
     setActionBusy(true)
     try {
       await window.api.convertToLocal(entry.id)
-      const next = convertNext
-      setConvertNext(null)
-      setDialog(next)
-      notify('已转为本地书')
-      await refresh()
     } catch (reason) {
       notify(`转换失败：${errorText(reason)}`)
+      return
     } finally {
       setActionBusy(false)
     }
+    const next = convertNext
+    setConvertNext(null)
+    setDialog(next)
+    notify('已转为本地书')
+    void refresh().catch((reason) => notify(`书架刷新失败：${errorText(reason)}`))
   }
 
   const runUpdateToc = async (entry: LibraryEntry): Promise<void> => {
@@ -745,12 +752,12 @@ export default function Library({
                 清洗规则
               </button>
               {onOpenNetworkSearch && (
-                <button className="ghost" onClick={onOpenNetworkSearch}>
+                <button className="ghost" disabled={busy} onClick={onOpenNetworkSearch}>
                   网络搜索
                 </button>
               )}
               {onOpenSources && (
-                <button className="ghost" onClick={onOpenSources}>
+                <button className="ghost" disabled={busy} onClick={onOpenSources}>
                   书源
                 </button>
               )}
@@ -886,7 +893,7 @@ export default function Library({
                 >
                   更新目录
                 </button>
-                {downloading.has(menu.entry.id) ? (
+                {downloading.has(menu.entry.id) || Boolean(downloads[menu.entry.id]) ? (
                   <button
                     onClick={() => {
                       setMenu(null)
@@ -907,7 +914,13 @@ export default function Library({
                           next.delete(menu.entry.id)
                           return next
                         })
+                        setDownloads((current) => {
+                          const next = { ...current }
+                          delete next[menu.entry.id]
+                          return next
+                        })
                         notify(`下载失败：${errorText(reason)}`)
+                        void refresh().catch(() => {})
                       })
                     }}
                   >
@@ -920,6 +933,7 @@ export default function Library({
                     menu.entry.downloadState !== 'complete' ? '未下载全本，无法转为本地书' : undefined
                   }
                   onClick={() => {
+                    setConvertNext(null)
                     setDialog({ kind: 'convert', entry: menu.entry })
                     setMenu(null)
                   }}
@@ -1188,10 +1202,10 @@ export default function Library({
       {dialog?.kind === 'convert' && (
         <Modal
           title="转为本地书"
-          onClose={() => setDialog(null)}
+          onClose={closeConvert}
           footer={
             <>
-              <button className="modal-button ghost" onClick={() => setDialog(null)}>
+              <button className="modal-button ghost" disabled={actionBusy} onClick={closeConvert}>
                 取消
               </button>
               <button

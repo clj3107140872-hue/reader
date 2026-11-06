@@ -32,8 +32,12 @@ export default function BookInfo({
           <dd>{entry.author}</dd>
         </>
       )}
-      <dt>源文件</dt>
-      <dd>{fileText}</dd>
+      {!network && (
+        <>
+          <dt>源文件</dt>
+          <dd>{fileText}</dd>
+        </>
+      )}
       <dt>格式</dt>
       <dd>{network ? '网络' : epub ? 'EPUB' : 'TXT'}</dd>
       {network && (
