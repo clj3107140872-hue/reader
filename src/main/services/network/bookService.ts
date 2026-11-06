@@ -9,8 +9,10 @@ import type {
   DownloadDone,
   DownloadFailedChapter,
   DownloadProgress,
+  TocChapter,
   UpdateTocResult
 } from '../../../core/booksource/model'
+import type { ParsedBookInfo } from '../../../core/booksource/parse'
 import { diffToc } from '../../../core/booksource/toc'
 import type { BookMeta, ChapterMeta, CleanedChapter, LibraryEntry } from '../../../core/model'
 import { chapterTitleHash } from '../../../core/chapters'
@@ -21,9 +23,13 @@ import type { BookRepository } from '../../storage/book'
 import type { LibraryRepository } from '../../storage/library'
 import type { NetworkBookRepository } from '../../storage/networkBook'
 import { assertBookId } from '../../bookId'
+import { userFacingNetworkError } from './errors'
 import type { SourceReader } from './sourceReader'
 import type { SourceService } from './sourceService'
+import type { OperationOutcome, SourceOperation } from './sourceStore'
 import { KeyedLocks, Semaphore } from './limits'
+
+type FetchOrigin = 'read' | 'download'
 
 export interface NetworkBookDeps {
   root: string
@@ -40,6 +46,12 @@ export interface NetworkBookDeps {
 function safeFileName(title: string): string {
   const base = title.replace(/[\\/:*?"<>|\r\n]/g, '_').trim().slice(0, 80) || '网络书'
   return `${base}.txt`
+}
+
+function cancellationError(reason?: 'source-deleted' | 'source-disabled'): Error {
+  if (reason === 'source-deleted') return new Error('书源已删除')
+  if (reason === 'source-disabled') return new Error('书源已停用')
+  return new Error('更新目录已取消')
 }
 
 function chapterFromToc(
@@ -71,9 +83,24 @@ export class NetworkBookService {
   private readonly allowNetwork: () => boolean
   private readonly root: string
   private readonly locks = new KeyedLocks()
-  private readonly bookSemaphore = new Semaphore(2)
+  /**
+   * 并发模型（spec 8.1 / 8.3）：读章全局 6、下载全局 4，每本书读写合计 2，
+   * 下载请求同一书源再限 2。获取顺序固定为
+   *   读章：globalRead -> perBook
+   *   下载：globalDownload -> perBook -> perSource
+   * 两种来源共用 perBook，且都先拿全局再拿书级，所以不会形成等待环；
+   * 交互阅读只受每本书 2 个的限制，不会排在下载队列后面。
+   */
   private readonly readSemaphore = new Semaphore(6)
-  private readonly chapterRequests = new Map<string, Promise<string>>()
+  private readonly downloadSemaphore = new Semaphore(4)
+  private readonly bookSemaphores = new Map<string, Semaphore>()
+  private readonly sourceSemaphores = new Map<string, Semaphore>()
+  private readonly chapterRequests = new Map<
+    string,
+    Promise<{ text: string; warnings: string[] }>
+  >()
+  /** 同一个 sourceId + bookUrl 的并发加入复用同一个请求。 */
+  private readonly addRequests = new Map<string, Promise<LibraryEntry>>()
   private readonly converting = new Set<string>()
   /** 正在拉取目录请求的 controller，删除/停用书源时按书中止。 */
   private readonly tocControllers = new Map<string, AbortController>()
@@ -106,24 +133,136 @@ export class NetworkBookService {
     }
   }
 
+  private semaphoreFor(map: Map<string, Semaphore>, key: string): Semaphore {
+    let semaphore = map.get(key)
+    if (!semaphore) {
+      semaphore = new Semaphore(2)
+      map.set(key, semaphore)
+    }
+    return semaphore
+  }
+
+  /** 全局配额先于每本书配额获取，避免两种来源交错拿锁形成等待环。 */
+  private withFetchGates<T>(
+    id: string,
+    origin: FetchOrigin,
+    task: () => Promise<T>
+  ): Promise<T> {
+    const global = origin === 'download' ? this.downloadSemaphore : this.readSemaphore
+    return global.run(() => this.semaphoreFor(this.bookSemaphores, id).run(task))
+  }
+
+  private recordOperation(
+    sourceId: string,
+    operation: SourceOperation,
+    outcome: OperationOutcome,
+    started: number,
+    message?: string
+  ): Promise<void> {
+    return this.sources
+      .recordOperation(sourceId, operation, outcome, Date.now() - started, message)
+      .catch(() => undefined)
+  }
+
+  /** spec 7.6：同一 sourceId + bookUrl 已存在时直接返回书架条目。 */
+  private async findShelfBook(sourceId: string, bookUrl: string): Promise<LibraryEntry | null> {
+    for (const entry of await this.library.list()) {
+      if (entry.format !== 'network' || entry.sourceId !== sourceId) continue
+      if (entry.bookUrl === bookUrl) return entry
+      if (!entry.bookUrl) {
+        // 旧条目没有 bookUrl，退回书籍元数据匹配。
+        try {
+          const meta = await this.networkBooks.readMeta(entry.id)
+          if (meta.network?.bookUrl === bookUrl) return entry
+        } catch {
+          // 损坏的书不参与查重。
+        }
+      }
+    }
+    return null
+  }
+
   async add(input: AddNetworkBookInput): Promise<LibraryEntry> {
     this.ensureNetwork()
+    const existing = await this.findShelfBook(input.sourceId, input.bookUrl)
+    if (existing) return existing
+    const key = `${input.sourceId}|${input.bookUrl}`
+    const running = this.addRequests.get(key)
+    if (running) return running
+    const request = this.addOnce(input)
+    this.addRequests.set(key, request)
+    try {
+      return await request
+    } finally {
+      if (this.addRequests.get(key) === request) this.addRequests.delete(key)
+    }
+  }
+
+  private async addOnce(input: AddNetworkBookInput): Promise<LibraryEntry> {
     const source = await this.sources.require(input.sourceId)
-    const info = await this.reader.info(source, input.bookUrl)
+    const infoStarted = Date.now()
+    let info: ParsedBookInfo & { bookUrl: string }
+    try {
+      info = await this.reader.info(source, input.bookUrl)
+      await this.recordOperation(
+        input.sourceId,
+        'info',
+        info.title ? 'success' : 'empty',
+        infoStarted
+      )
+    } catch (error) {
+      // spec 7.6：书信息失败不阻断加入，书名/作者等用搜索结果补齐，缺失留空。
+      const message = userFacingNetworkError(error, source.name)
+      console.warn(`[network] 书籍信息获取失败，已用搜索结果补齐（${source.name}）：${message}`)
+      await this.recordOperation(input.sourceId, 'info', 'error', infoStarted, message)
+      info = {
+        title: input.title?.trim() ?? '',
+        author: input.author?.trim() ?? '',
+        kind: input.kind?.trim() ?? '',
+        intro: input.intro?.trim() ?? '',
+        coverUrl: '',
+        lastChapter: input.lastChapter?.trim() ?? '',
+        tocUrl: input.bookUrl,
+        bookUrl: input.bookUrl
+      }
+    }
     const title = (info.title || input.title || '').trim()
     if (!title) throw new Error('没有从书源拿到书名')
-    const toc = await this.reader.toc(source, {
-      bookUrl: info.bookUrl,
-      tocUrl: info.tocUrl || info.bookUrl
-    })
+    const tocStarted = Date.now()
+    let toc
+    try {
+      toc = await this.reader.toc(source, {
+        bookUrl: info.bookUrl,
+        tocUrl: info.tocUrl || info.bookUrl
+      })
+    } catch (error) {
+      await this.recordOperation(
+        input.sourceId,
+        'toc',
+        'error',
+        tocStarted,
+        userFacingNetworkError(error, source.name)
+      )
+      throw new Error('目录获取失败，换一个书源试试')
+    }
+    await this.recordOperation(
+      input.sourceId,
+      'toc',
+      toc.chapters.length > 0 ? 'success' : 'empty',
+      tocStarted
+    )
     const chapters = toc.chapters.map((chapter, index) =>
       chapterFromToc(chapter.title, chapter.url, chapter.level, index)
     )
-    if (chapters.length === 0) throw new Error('书源没有返回目录')
+    if (chapters.length === 0) throw new Error('目录获取失败，换一个书源试试')
     const contentChapterCount = chapters.filter(
       (chapter) => chapter.level !== 'volume' && chapter.url
     ).length
     if (contentChapterCount === 0) throw new Error('书源没有返回可读章节')
+    const author = (info.author || input.author || '').trim()
+    const intro = (info.intro || input.intro || '').trim()
+    const kind = (info.kind || input.kind || '').trim()
+    const lastChapter = (info.lastChapter || input.lastChapter || '').trim()
     const id = randomUUID()
     const now = new Date().toISOString()
     const meta: BookMeta = {
@@ -134,16 +273,16 @@ export class NetworkBookService {
       format: 'network',
       chapters,
       createdAt: now,
-      ...(info.author || input.author ? { author: info.author || input.author } : {}),
-      ...(info.intro ? { intro: info.intro } : {}),
-      ...(info.kind ? { kind: info.kind } : {}),
+      ...(author ? { author } : {}),
+      ...(intro ? { intro } : {}),
+      ...(kind ? { kind } : {}),
       network: {
         sourceId: input.sourceId,
         sourceUrl: source.url,
         sourceName: source.name,
         bookUrl: info.bookUrl,
         tocUrl: info.tocUrl || info.bookUrl,
-        ...(info.lastChapter ? { lastChapter: info.lastChapter } : {}),
+        ...(lastChapter ? { lastChapter } : {}),
         lastTocAt: now,
         lastCheckAt: now,
         lastDownloadAt: null
@@ -160,9 +299,10 @@ export class NetworkBookService {
       ...(meta.kind ? { kind: meta.kind } : {}),
       sourceId: input.sourceId,
       sourceName: source.name,
+      bookUrl: input.bookUrl,
       normalizedTitle: normalizeBookTitle(safeFileName(title)),
       sourceFileName: safeFileName(title),
-      fileHash: createHash('sha256').update(`network:${input.sourceId}:${info.bookUrl}`).digest('hex'),
+      fileHash: createHash('sha256').update(`network:${input.sourceId}:${input.bookUrl}`).digest('hex'),
       encoding: 'utf-8',
       importedAt: now,
       lastReadAt: null,
@@ -181,63 +321,112 @@ export class NetworkBookService {
     return entry
   }
 
-  async readChapter(id: string, index: number): Promise<{ text: string; cached: boolean }> {
+  async readChapter(
+    id: string,
+    index: number,
+    origin: FetchOrigin = 'read'
+  ): Promise<{ text: string; cached: boolean; warnings?: string[] }> {
     assertBookId(id)
     if (this.converting.has(id)) throw new Error('正在转为本地书，请稍候')
     if (!Number.isInteger(index) || index < 0) throw new Error('章节不存在')
     const cached = await this.networkBooks.readChapterText(id, index)
     if (cached) return { text: cached, cached: true }
+    // spec 8.1：卷标题没有正文，在联网检查和任何并发配额之前直接返回。
+    const initial = await this.networkBooks.readMeta(id)
+    if (initial.format !== 'network' || !initial.network) throw new Error('这不是网络书')
+    const initialChapter = initial.chapters[index]
+    if (!initialChapter) throw new Error('章节不存在')
+    if (initialChapter.level === 'volume') return { text: '', cached: true }
     this.ensureNetwork()
     const key = `${id}:${index}`
     const existing = this.chapterRequests.get(key)
-    if (existing) return { text: await existing, cached: false }
+    if (existing) {
+      const result = await existing
+      return {
+        text: result.text,
+        cached: false,
+        ...(result.warnings.length > 0 ? { warnings: result.warnings } : {})
+      }
+    }
     const request = this.locks.run(key, () =>
-      this.bookSemaphore.run(() =>
-        this.readSemaphore.run(async () => {
-          const again = await this.networkBooks.readChapterText(id, index)
-          if (again) return again
-          // 这个请求可能在外层检查之后才登记到 chapterRequests，转换开始前
-          // 再查一次，避免转换期间往旧目录写章节。
-          if (this.converting.has(id)) throw new Error('正在转为本地书，请稍候')
-          const meta = await this.networkBooks.readMeta(id)
-          if (meta.format !== 'network' || !meta.network) throw new Error('这不是网络书')
-          const chapter = meta.chapters[index]
-          if (!chapter) throw new Error('章节不存在')
-          if (!chapter.url) throw new Error('这一章没有正文地址')
-          const source = await this.sources.require(meta.network.sourceId)
-          const content = await this.reader.content(source, {
-            chapterUrl: chapter.url,
+      this.withFetchGates(id, origin, async () => {
+        const again = await this.networkBooks.readChapterText(id, index)
+        if (again) return { text: again, warnings: [] }
+        // 这个请求可能在外层检查之后才登记到 chapterRequests，转换开始前
+        // 再查一次，避免转换期间往旧目录写章节。
+        if (this.converting.has(id)) throw new Error('正在转为本地书，请稍候')
+        const meta = await this.networkBooks.readMeta(id)
+        if (meta.format !== 'network' || !meta.network) throw new Error('这不是网络书')
+        const chapter = meta.chapters[index]
+        if (!chapter) throw new Error('章节不存在')
+        if (chapter.level === 'volume') return { text: '', warnings: [] }
+        if (!chapter.url) throw new Error('这一章没有正文地址')
+        const sourceId = meta.network.sourceId
+        const source = await this.sources.require(sourceId)
+        const started = Date.now()
+        const fetchOnce = (): Promise<{ text: string; warnings: string[] }> =>
+          this.reader.content(source, {
+            chapterUrl: chapter.url!,
             chapterName: chapter.title,
-            bookUrl: meta.network.bookUrl
+            bookUrl: meta.network!.bookUrl
           })
-          if (!content.text.trim()) throw new Error('书源返回了空正文')
-          const cleaning = this.cleaning()
-          const cleaned = cleanChapters(
-            [
-              {
-                title: chapter.title,
-                level: 'chapter',
-                startLine: 0,
-                paragraphs: content.text.split(/\n{2,}/)
-              }
-            ],
-            cleaning.rules,
-            { adCleaning: cleaning.adCleaning }
-          ).chapters[0]
-          const text = cleaned.paragraphs.join('\n\n')
-          await this.networkBooks.writeChapter(id, index, content.text, text)
-          const info = await this.cacheInfo(id, meta)
-          await this.library.update(id, {
-            networkCache: info,
-            downloadState: downloadState(info.cached, info.total)
-          })
-          return text
+        let content: { text: string; warnings: string[] }
+        try {
+          // 下载时同一书源再限 2 个请求；交互阅读不占书源配额。
+          content =
+            origin === 'download'
+              ? await this.semaphoreFor(this.sourceSemaphores, sourceId).run(fetchOnce)
+              : await fetchOnce()
+        } catch (error) {
+          const message = userFacingNetworkError(error, source.name)
+          await this.recordOperation(sourceId, 'content', 'error', started, message)
+          throw new Error(message)
+        }
+        await this.recordOperation(
+          sourceId,
+          'content',
+          content.text.trim() ? 'success' : 'empty',
+          started
+        )
+        if (!content.text.trim()) throw new Error('书源返回了空正文')
+        const warnings = [...content.warnings]
+        const cleaning = this.cleaning()
+        const cleaned = cleanChapters(
+          [
+            {
+              title: chapter.title,
+              level: 'chapter',
+              startLine: 0,
+              paragraphs: content.text.split(/\n{2,}/)
+            }
+          ],
+          cleaning.rules,
+          { adCleaning: cleaning.adCleaning }
+        ).chapters[0]
+        let text = cleaned.paragraphs.join('\n\n')
+        if (!text.trim()) {
+          // spec 8.1：整章都被清洗规则移除时保留原文；缓存文件不能为空，
+          // 否则这一章永远算未缓存，下载无法完成、转本地也会被卡住。
+          text = content.text.trim()
+          warnings.push('清洗后正文为空，已回退显示原始正文')
+        }
+        await this.networkBooks.writeChapter(id, index, content.text, text)
+        const info = await this.cacheInfo(id, meta)
+        await this.library.update(id, {
+          networkCache: info,
+          downloadState: downloadState(info.cached, info.total)
         })
-      )
+        return { text, warnings }
+      })
     )
     this.chapterRequests.set(key, request)
     try {
-      return { text: await request, cached: false }
+      const result = await request
+      return {
+        text: result.text,
+        cached: false,
+        ...(result.warnings.length > 0 ? { warnings: result.warnings } : {})
+      }
     } finally {
       this.chapterRequests.delete(key)
     }
@@ -358,6 +547,7 @@ export class NetworkBookService {
           await this.library.update(id, {
             format: 'txt',
             sourceId: undefined,
+            bookUrl: undefined,
             networkCache: undefined,
             downloadState: undefined,
             stats: {
@@ -403,18 +593,35 @@ export class NetworkBookService {
       const controller = new AbortController()
       this.tocControllers.set(id, controller)
       try {
-        const toc = await this.reader.toc(
-          source,
-          {
-            bookUrl: meta.network.bookUrl,
-            tocUrl: meta.network.tocUrl
-          },
-          controller.signal
-        )
-        const cancelReason = this.tocCancelReasons.get(id)
-        if (cancelReason) {
-          throw new Error(cancelReason === 'source-deleted' ? '书源已删除' : '书源已停用')
+        const tocStarted = Date.now()
+        let toc: { chapters: TocChapter[]; warnings: string[] }
+        try {
+          toc = await this.reader.toc(
+            source,
+            {
+              bookUrl: meta.network.bookUrl,
+              tocUrl: meta.network.tocUrl
+            },
+            controller.signal
+          )
+        } catch (error) {
+          // 用户取消或书源被删除/停用不算书源失败，不写统计。
+          if (controller.signal.aborted || this.tocCancelReasons.has(id)) {
+            throw cancellationError(this.tocCancelReasons.get(id))
+          }
+          const message = userFacingNetworkError(error, source.name)
+          await this.recordOperation(meta.network.sourceId, 'toc', 'error', tocStarted, message)
+          throw new Error(message)
         }
+        if (controller.signal.aborted || this.tocCancelReasons.has(id)) {
+          throw cancellationError(this.tocCancelReasons.get(id))
+        }
+        await this.recordOperation(
+          meta.network.sourceId,
+          'toc',
+          toc.chapters.length > 0 ? 'success' : 'empty',
+          tocStarted
+        )
         const previousCount = meta.chapters.length
         const result = diffToc(meta.chapters, toc.chapters)
         meta.chapters = result.chapters
@@ -439,9 +646,8 @@ export class NetworkBookService {
           ...(result.lastChapter ? { lastChapter: result.lastChapter } : {})
         }
       } catch (error) {
-        const cancelReason = this.tocCancelReasons.get(id)
-        if (cancelReason) {
-          throw new Error(cancelReason === 'source-deleted' ? '书源已删除' : '书源已停用')
+        if (this.tocCancelReasons.has(id)) {
+          throw cancellationError(this.tocCancelReasons.get(id))
         }
         throw error
       } finally {
@@ -486,8 +692,8 @@ export class NetworkBookService {
       let done = pending.length - todo.length
       onProgress({ bookId: id, done, total: pending.length, failed: 0 })
 
-      // bookSemaphore 是服务级 Semaphore(2)，不是每书一个：所有书的章节请求
-      // 合计最多同时跑 2 个，所以这里的 4 个 worker 实际最多同时跑 2 章。
+      // 4 个 worker 是下载上限；真正发请求时每本书再限 2、每个书源再限 2，
+      // 全局下载配额 4 由 readChapter 的 origin = 'download' 统一获取。
       const queue = [...todo]
       const workers = Array.from({ length: Math.min(4, queue.length) }, async () => {
         while (queue.length > 0) {
@@ -495,7 +701,7 @@ export class NetworkBookService {
           const chapter = queue.shift()
           if (!chapter) return
           try {
-            await this.readChapter(id, chapter.index)
+            await this.readChapter(id, chapter.index, 'download')
             done++
           } catch (error) {
             if (controller.signal.aborted) return
