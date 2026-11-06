@@ -12,6 +12,9 @@ export function htmlToParagraphs(html: string): string[] {
   root.find('script,style,iframe,noscript,svg,canvas').remove()
   root.find('br').replaceWith('\n')
   root.find(BLOCK_TAGS).each((_index, node) => {
+    // A block nested in another block needs a boundary on both sides, or its
+    // first line runs into the previous paragraph.
+    $(node).prepend('\n')
     $(node).append('\n')
   })
   return root
