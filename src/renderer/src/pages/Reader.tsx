@@ -548,8 +548,9 @@ export default function Reader({
   // A jump into a lazy network chapter keeps its requested paragraph here
   // until the chapter (and every rendered chapter above it) has loaded.
   const pendingTargetRef = useRef<{ chapterIndex: number; paragraphIndex: number } | null>(null)
-  // Set by wheel and keyboard scrolling so handleScroll can tell a real user
-  // scroll from the browser clamping scrollTop while placeholders load.
+  // Set by pointer, touch and keyboard gestures so handleScroll can tell a
+  // real user scroll from the browser clamping scrollTop while placeholders
+  // load; the first scroll event consumes it.
   const userScrollRef = useRef(false)
   const pagedRef = useRef(paged)
   pagedRef.current = paged
@@ -1378,15 +1379,16 @@ export default function Reader({
     }
     scroller.addEventListener('pointerdown', start)
     scroller.addEventListener('touchstart', start, { passive: true })
+    // No pointercancel here: Chromium fires it ~12ms before a touch pan's
+    // first scroll event, which would clear the intent too early. Touch ends
+    // on touchend/touchcancel, both after the last scroll event.
     scroller.addEventListener('pointerup', end)
-    scroller.addEventListener('pointercancel', end)
     scroller.addEventListener('touchend', end, { passive: true })
     scroller.addEventListener('touchcancel', end, { passive: true })
     return () => {
       scroller.removeEventListener('pointerdown', start)
       scroller.removeEventListener('touchstart', start)
       scroller.removeEventListener('pointerup', end)
-      scroller.removeEventListener('pointercancel', end)
       scroller.removeEventListener('touchend', end)
       scroller.removeEventListener('touchcancel', end)
     }
