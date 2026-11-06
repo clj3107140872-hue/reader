@@ -46,7 +46,7 @@ function valueAt(definition: Record<string, unknown>, path: string): unknown {
   }, definition)
 }
 
-function parseHeader(value: unknown, warnings: string[]): Record<string, string> {
+export function parseHeader(value: unknown, warnings: string[]): Record<string, string> {
   if (value === undefined || value === null || value === '') return {}
   if (typeof value === 'object' && !Array.isArray(value)) {
     const headers: Record<string, string> = {}

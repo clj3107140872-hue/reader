@@ -115,7 +115,7 @@ function listDocuments(
     ''
   if (doc.kind === 'json') {
     if (!/^@json:/i.test(selected) && selected !== '$') {
-      throw new Error('这个书源要求 JSONPath，但响应不是 JSON')
+      throw new Error('响应是 JSON，但规则不是 JSONPath')
     }
     const path = selected.replace(/^@json:/i, '') || '$'
     const values = JSONPath({ path, json: doc.value as object, wrap: true }) as unknown[]
@@ -131,9 +131,16 @@ function listDocuments(
   }))
 }
 
-function field(rule: string, doc: RuleDocument, context: RuleContext): string {
+function field(
+  rule: string,
+  doc: RuleDocument,
+  context: RuleContext,
+  warnings?: string[]
+): string {
   if (!rule) return ''
-  return evaluateRule(rule, doc, context).values
+  const result = evaluateRule(rule, doc, context)
+  warnings?.push(...result.warnings)
+  return result.values
     .map((value) => value.trim())
     .filter(Boolean)
     .join('\n')
@@ -200,6 +207,7 @@ export function parseBookInfoPage(
 
 export interface ParsedToc {
   chapters: TocChapter[]
+  warnings: string[]
   nextUrl?: string
 }
 
@@ -209,22 +217,24 @@ export function parseTocPage(
   context: RuleContext
 ): ParsedToc {
   const chapters: TocChapter[] = []
+  const warnings: string[] = []
   for (const { doc: itemDoc, base } of listDocuments(doc, rules.tocChapterList)) {
-    const title = field(rules.tocChapterName || '@text', itemDoc, context)
-    const url = absoluteUrl(field(rules.tocChapterUrl || '@href', itemDoc, context), base)
+    const title = field(rules.tocChapterName || '@text', itemDoc, context, warnings)
+    const url = absoluteUrl(field(rules.tocChapterUrl || '@href', itemDoc, context, warnings), base)
     const volume = rules.tocIsVolume
-      ? Boolean(field(rules.tocIsVolume, itemDoc, context))
+      ? Boolean(field(rules.tocIsVolume, itemDoc, context, warnings))
       : false
     if (!title || (!url && !volume)) continue
     chapters.push({ title, url, level: volume ? 'volume' : 'chapter' })
   }
-  const next = rules.tocNextUrl ? field(rules.tocNextUrl, doc, context) : ''
+  const next = rules.tocNextUrl ? field(rules.tocNextUrl, doc, context, warnings) : ''
   const nextUrl = absoluteUrl(next, doc.url)
-  return { chapters, ...(nextUrl ? { nextUrl } : {}) }
+  return { chapters, warnings, ...(nextUrl ? { nextUrl } : {}) }
 }
 
 export interface ParsedContent {
   text: string
+  warnings: string[]
   nextUrl?: string
 }
 
@@ -233,12 +243,14 @@ export function parseContentPage(
   rules: SourceRules,
   context: RuleContext
 ): ParsedContent {
-  const raw = field(rules.content, doc, context)
+  const warnings: string[] = []
+  const raw = field(rules.content, doc, context, warnings)
   const paragraphs = htmlToParagraphs(raw)
-  const next = rules.contentNextUrl ? field(rules.contentNextUrl, doc, context) : ''
+  const next = rules.contentNextUrl ? field(rules.contentNextUrl, doc, context, warnings) : ''
   const nextUrl = absoluteUrl(next, doc.url)
   return {
     text: paragraphs.join('\n\n'),
+    warnings,
     ...(nextUrl ? { nextUrl } : {})
   }
 }

@@ -228,9 +228,10 @@ function jsonValues(path: string, value: unknown, suffix: string): string[] {
 }
 
 function htmlValues(selector: string, suffix: string, doc: { html: string }): string[] {
-  // Fragment mode keeps the document's own root element(s) addressable, so a
-  // bare suffix rule (`@href`, `@text`) can read from the item element itself.
-  const $ = load(doc.html, null, false)
+  // Bare suffix rules address the item element itself, so they load in
+  // fragment mode. Selector-bearing rules keep the full document tree, since
+  // a fragment parse drops <html>/<body> and "body ..." selectors would miss.
+  const $ = selector ? load(doc.html) : load(doc.html, null, false)
   const nodes = selector ? $(selector) : $.root().children()
   const values: string[] = []
   nodes.each((_index, node) => {

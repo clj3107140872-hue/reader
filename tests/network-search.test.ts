@@ -14,7 +14,13 @@ process.env.READER_ALLOW_LOCAL_SOURCES = '1'
 let root = ''
 let close: (() => Promise<void>) | null = null
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'reader-search-')) })
-afterEach(async () => { if (close) await close(); await rm(root, { recursive: true, force: true }) })
+afterEach(async () => {
+  if (close) {
+    await close()
+    close = null
+  }
+  await rm(root, { recursive: true, force: true })
+})
 
 describe('NetworkSearchService', () => {
   it('searches quality sources, groups results and records stats', async () => {
@@ -59,5 +65,44 @@ describe('NetworkSearchService', () => {
     expect(cancelled.cancelled).toBe(true)
     expect(cancelled.failed).toBe(0)
     expect(cancelled.groups).toHaveLength(0)
+    expect(cancelled.searched).toBe(0)
+  })
+
+  it('maps non-Chinese errors to a search failure message and keeps Chinese ones', async () => {
+    const now = new Date().toISOString()
+    const items = [
+      {
+        id: 'a', name: '源A', url: 'https://a.example', group: '', enabled: true,
+        starred: false, blacklisted: false, compat: { level: 'full' as const, issues: [] },
+        score: 60, searchSuccessRate: 0, avgMs: 0, importedAt: now, customOrder: 0
+      },
+      {
+        id: 'b', name: '源B', url: 'https://b.example', group: '', enabled: true,
+        starred: false, blacklisted: false, compat: { level: 'full' as const, issues: [] },
+        score: 60, searchSuccessRate: 0, avgMs: 0, importedAt: now, customOrder: 0
+      }
+    ]
+    const sources = {
+      list: async () => items,
+      require: async (id: string) => {
+        if (id === 'a') throw new TypeError('boom')
+        throw new Error('书源已删除，无法联网')
+      }
+    } as unknown as SourceService
+    const store = new SourceStore(root)
+    const service = new NetworkSearchService(
+      sources,
+      store,
+      new SourceReader(new HttpClient()),
+      new LibraryRepository(root)
+    )
+    const messages = new Map<string, string | undefined>()
+    const done = await service.search(
+      { requestId: 'r-errors', keyword: '书', scope: 'all' },
+      { source: (event) => { messages.set(event.sourceId, event.message) }, results: () => {} }
+    )
+    expect(done.failed).toBe(2)
+    expect(messages.get('a')).toBe('搜索失败')
+    expect(messages.get('b')).toBe('书源已删除，无法联网')
   })
 })

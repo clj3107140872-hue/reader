@@ -108,6 +108,12 @@ describe('booksource page parsing', () => {
     expect(content.nextUrl).toBeUndefined()
   })
 
+  it('reports a JSON response with a non-JSONPath rule', () => {
+    const doc = documentFromResponse('{"books":[]}', 'application/json', 'https://example.com')
+    expect(() => parseSearchPage(doc, rules, { baseUrl: 'https://example.com' }))
+      .toThrow('响应是 JSON，但规则不是 JSONPath')
+  })
+
   it('rejects JSON rules on HTML and javascript: links', () => {
     const html = documentFromResponse('<div>x</div>', 'text/html', 'https://example.com')
     const jsonRules = { ...rules, searchBookList: '@json:$.books[*]' }

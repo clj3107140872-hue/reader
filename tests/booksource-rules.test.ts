@@ -89,6 +89,17 @@ describe('booksource rules', () => {
       .toBe('https://example.com/ch/1?x=1&y=2')
   })
 
+  it('keeps the full document for selector-bearing rules', () => {
+    const doc = {
+      kind: 'html' as const,
+      html: '<html><body><div class="detail"><h1>书</h1></div></body></html>',
+      url: 'https://example.com'
+    }
+    expect(
+      evaluateRule('body .detail h1@text', doc, { baseUrl: 'https://example.com' }).values
+    ).toEqual(['书'])
+  })
+
   it('supports index syntax before and after the suffix', () => {
     const doc = {
       kind: 'html' as const,

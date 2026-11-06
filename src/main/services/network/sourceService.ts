@@ -3,7 +3,7 @@ import type {
   SourceListItem,
   StoredSource
 } from '../../../core/booksource/model'
-import { parseSourceJson, parseSourceValue } from '../../../core/booksource/legado'
+import { parseHeader, parseSourceJson, parseSourceValue } from '../../../core/booksource/legado'
 import type { ParsedSource } from '../../../core/booksource/legado'
 import type { LibraryRepository } from '../../storage/library'
 import type { HttpClient } from './httpClient'
@@ -44,27 +44,12 @@ export class SourceService {
       url: String(stored.definition.bookSourceUrl ?? ''),
       group: String(stored.definition.bookSourceGroup ?? ''),
       searchUrl: String(stored.definition.searchUrl ?? ''),
-      header: this.header(stored.definition.header),
+      header: parseHeader(stored.definition.header, []),
       ...(typeof stored.definition.charset === 'string'
         ? { charset: stored.definition.charset }
         : {}),
       customOrder: Number(stored.definition.customOrder ?? 0),
       compat: stored.compat
-    }
-  }
-
-  private header(value: unknown): Record<string, string> {
-    if (typeof value !== 'string') return {}
-    try {
-      const parsed = JSON.parse(value) as unknown
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-      return Object.fromEntries(
-        Object.entries(parsed as Record<string, unknown>).filter(
-          (entry): entry is [string, string] => typeof entry[1] === 'string'
-        )
-      )
-    } catch {
-      return {}
     }
   }
 

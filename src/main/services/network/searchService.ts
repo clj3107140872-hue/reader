@@ -11,6 +11,7 @@ import type {
   NetworkSearchSourceEvent
 } from '../../../shared/api'
 import type { LibraryRepository } from '../../storage/library'
+import { NetworkError } from './httpClient'
 import type { SourceReader } from './sourceReader'
 import type { SourceService } from './sourceService'
 import type { SourceStore } from './sourceStore'
@@ -18,9 +19,13 @@ import type { SourceStore } from './sourceStore'
 const CONCURRENCY = 6
 const PER_SOURCE_LIMIT = 100
 
+const CHINESE = /[㐀-鿿]/
+
 /** The renderer has its own error formatter; the main process keeps a local one. */
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : '搜索失败'
+  if (error instanceof NetworkError) return error.message
+  const message = error instanceof Error ? error.message : ''
+  return CHINESE.test(message) ? message : '搜索失败'
 }
 
 export interface SearchEmitter {
@@ -141,8 +146,11 @@ export class NetworkSearchService {
             message
           })
         } finally {
-          searched++
-          remaining--
+          // A cancelled source was not searched; do not count it.
+          if (!job.cancelled) {
+            searched++
+            remaining--
+          }
         }
         emit.results({
           groups: mergeSearchResults(collected),
