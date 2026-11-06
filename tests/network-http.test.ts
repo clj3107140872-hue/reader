@@ -1,7 +1,7 @@
 import { gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startFakeServer } from './helpers/networkServer'
-import { HttpClient } from '../src/main/services/network/httpClient'
+import { HttpClient, NetworkError, isBlockedAddress } from '../src/main/services/network/httpClient'
 
 process.env.READER_ALLOW_LOCAL_SOURCES = '1'
 
@@ -32,6 +32,33 @@ describe('HttpClient', () => {
     } finally {
       process.env.READER_ALLOW_LOCAL_SOURCES = previous
     }
+  })
+
+  it('blocks IPv4-mapped IPv6 forms', () => {
+    expect(isBlockedAddress('::ffff:127.0.0.1')).toBe(true)
+    expect(isBlockedAddress('::ffff:7f00:1')).toBe(true)
+    expect(isBlockedAddress('::ffff:c0a8:101')).toBe(true)
+    expect(isBlockedAddress('::ffff:8.8.8.8')).toBe(false)
+  })
+
+  it('revalidates redirect targets and blocks private ones', async () => {
+    const server = await startFakeServer((_req, res) => {
+      res.writeHead(302, { Location: 'http://10.255.255.1:9/' })
+      res.end()
+    })
+    close = server.close
+    const client = new HttpClient()
+    await expect(client.request({ url: `${server.url}/to-private` }))
+      .rejects.toMatchObject({ kind: 'blocked' })
+  })
+
+  it('turns an invalid address into a Chinese error', async () => {
+    const client = new HttpClient()
+    const rejection = client.request({ url: 'not a url' })
+    await expect(rejection).rejects.toBeInstanceOf(NetworkError)
+    await expect(rejection).rejects.toMatchObject({
+      message: expect.stringMatching(/[一-鿿]/)
+    })
   })
 
   it('decodes GBK', async () => {
