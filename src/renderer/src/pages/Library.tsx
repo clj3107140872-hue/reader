@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { DownloadProgress } from '../../../core/booksource/model'
 import type { LibraryEntry } from '../../../core/model'
 import type {
   BackupInfo,
@@ -66,6 +67,7 @@ type Dialog =
   | { kind: 'resplit'; entry: LibraryEntry }
   | { kind: 'markers'; entry: LibraryEntry }
   | { kind: 'encoding'; entry: LibraryEntry }
+  | { kind: 'convert'; entry: LibraryEntry }
   | { kind: 'cleaning'; bookId: string | null; tab: 'report' | 'rules' }
 
 interface ToastAction {
@@ -93,7 +95,17 @@ function clampMenu(x: number, y: number): { x: number; y: number } {
   }
 }
 
-export default function Library({ onOpen }: { onOpen: (bookId: string) => void }) {
+export default function Library({
+  onOpen,
+  onOpenSources,
+  onOpenNetworkSearch,
+  networkEnabled = true
+}: {
+  onOpen: (bookId: string) => void
+  onOpenSources?: () => void
+  onOpenNetworkSearch?: () => void
+  networkEnabled?: boolean
+}) {
   const [entries, setEntries] = useState<LibraryEntry[]>([])
   const [toast, setToast] = useState<{ id: number; text: string; action?: ToastAction } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -120,6 +132,11 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
   const [backups, setBackups] = useState<BackupInfo[]>([])
   const [backupConfirm, setBackupConfirm] = useState<string | null>(null)
   const [backupBusy, setBackupBusy] = useState(false)
+  const [sourceIds, setSourceIds] = useState<Set<string>>(new Set())
+  const [sourcesLoaded, setSourcesLoaded] = useState(false)
+  const [downloads, setDownloads] = useState<Record<string, DownloadProgress>>({})
+  const [downloading, setDownloading] = useState<Set<string>>(new Set())
+  const [convertNext, setConvertNext] = useState<Dialog | null>(null)
   const hoverTimer = useRef<number | null>(null)
   const busyRef = useRef(false)
 
@@ -192,10 +209,14 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     let done = 0
     const failures: string[] = []
     const kept: string[] = []
+    const skippedNetwork =
+      kind === 'delete' ? 0 : targets.filter((entry) => entry.format === 'network').length
+    const runnable =
+      kind === 'delete' ? targets : targets.filter((entry) => entry.format !== 'network')
 
-    for (let index = 0; index < targets.length; index++) {
-      const entry = targets[index]
-      setBatch({ kind, total: targets.length, done: index + 1 })
+    for (let index = 0; index < runnable.length; index++) {
+      const entry = runnable[index]
+      setBatch({ kind, total: runnable.length, done: index + 1 })
       try {
         if (kind === 'delete') {
           await window.api.removeBook(entry.id)
@@ -222,10 +243,12 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
       failures.length > 0
         ? `；失败 ${failures.length} 本：${limitedJoin(failures)}`
         : ''
+    const skippedText =
+      skippedNetwork > 0 ? `；已跳过 ${skippedNetwork} 本未转本地的网络书` : ''
     const summary =
       failures.length > 0
-        ? `${BATCH_LABELS[kind]}完成 ${done} 本${keptText}${failureText}`
-        : `${BATCH_LABELS[kind]}完成，共 ${done} 本${keptText}`
+        ? `${BATCH_LABELS[kind]}完成 ${done} 本${keptText}${failureText}${skippedText}`
+        : `${BATCH_LABELS[kind]}完成，共 ${done} 本${keptText}${skippedText}`
     notify(summary)
     if (kind === 'delete') exitSelection()
     try {
@@ -294,13 +317,27 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     if (!candidate) return
     setActionBusy(true)
     try {
-      const existing = new Set((await window.api.libraryList()).map((entry) => entry.id))
+      const existingEntries = await window.api.libraryList()
+      const existing = new Set(existingEntries.map((entry) => entry.id))
       if (!existing.has(candidate.targetId) || !existing.has(candidate.sourceId)) {
         notify(`《${candidate.targetTitle}》或《${candidate.sourceTitle}》已不在书架，已跳过这一对`)
         const tally = { ...mergeTally, skipped: mergeTally.skipped + 1 }
         setMergeTally(tally)
         finishMerge(mergeCandidates.slice(1), tally)
         return
+      }
+
+      for (const id of [candidate.targetId, candidate.sourceId]) {
+        const entry = existingEntries.find((item) => item.id === id)
+        if (entry?.format !== 'network') continue
+        if (entry.downloadState !== 'complete') {
+          notify(`《${entry.title}》未下载全本，已跳过这一对`)
+          const tally = { ...mergeTally, skipped: mergeTally.skipped + 1 }
+          setMergeTally(tally)
+          finishMerge(mergeCandidates.slice(1), tally)
+          return
+        }
+        await window.api.convertToLocal(id)
       }
 
       const result = await window.api.mergeBooks(candidate.targetId, candidate.sourceId)
@@ -340,6 +377,43 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     return window.api.onImportProgress((payload) => {
       setProgress(`正在处理：${payload.fileName} · ${STAGE_LABELS[payload.stage] ?? payload.stage}`)
     })
+  }, [])
+
+  useEffect(() => {
+    void window.api
+      .sourceList()
+      .then((items) => {
+        setSourceIds(new Set(items.map((item) => item.id)))
+        setSourcesLoaded(true)
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const offProgress = window.api.onDownloadProgress((payload) => {
+      setDownloads((current) => ({ ...current, [payload.bookId]: payload }))
+    })
+    const offDone = window.api.onDownloadDone((payload) => {
+      setDownloads((current) => {
+        const next = { ...current }
+        delete next[payload.bookId]
+        return next
+      })
+      setDownloading((current) => {
+        const next = new Set(current)
+        next.delete(payload.bookId)
+        return next
+      })
+      if (payload.cancelled) notify('已取消下载')
+      else if (payload.failedChapters.length > 0) {
+        notify(`下载完成，但有 ${payload.failedChapters.length} 章失败，可再次点击继续`)
+      } else notify('已下载全本')
+      void refresh()
+    })
+    return () => {
+      offProgress()
+      offDone()
+    }
   }, [])
 
   useEffect(() => {
@@ -561,6 +635,47 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
     }
   }
 
+  // A fully downloaded network book is converted to a local book before any
+  // local-only edit; an incomplete one is refused with a notice.
+  const openLocalDialog = (entry: LibraryEntry, next: Dialog): void => {
+    if (entry.format !== 'network') {
+      setDialog(next)
+      return
+    }
+    if (entry.downloadState !== 'complete') {
+      notify('未下载全本，无法执行这个操作')
+      return
+    }
+    setConvertNext(next)
+    setDialog({ kind: 'convert', entry })
+  }
+
+  const confirmConvert = async (entry: LibraryEntry): Promise<void> => {
+    setActionBusy(true)
+    try {
+      await window.api.convertToLocal(entry.id)
+      const next = convertNext
+      setConvertNext(null)
+      setDialog(next)
+      notify('已转为本地书')
+      await refresh()
+    } catch (reason) {
+      notify(`转换失败：${errorText(reason)}`)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const runUpdateToc = async (entry: LibraryEntry): Promise<void> => {
+    try {
+      const result = await window.api.updateToc(entry.id)
+      notify(result.added > 0 ? `目录已更新，新增 ${result.added} 章` : '目录已是最新')
+      await refresh()
+    } catch (reason) {
+      notify(`更新目录失败：${errorText(reason)}`)
+    }
+  }
+
   const handleMarkersApplied = (entry: LibraryEntry, result: ReprocessResult): void => {
     setDialog(null)
     notify(
@@ -629,6 +744,16 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
               >
                 清洗规则
               </button>
+              {onOpenNetworkSearch && (
+                <button className="ghost" onClick={onOpenNetworkSearch}>
+                  网络搜索
+                </button>
+              )}
+              {onOpenSources && (
+                <button className="ghost" onClick={onOpenSources}>
+                  书源
+                </button>
+              )}
               <button onClick={() => void handleImport()} disabled={busy}>
                 {busy ? '导入中…' : '导入书籍'}
               </button>
@@ -709,6 +834,13 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
               selectable={selectionMode}
               selected={selected.has(entry.id)}
               onToggle={() => toggleSelected(entry.id)}
+              sourceMissing={
+                sourcesLoaded &&
+                entry.format === 'network' &&
+                Boolean(entry.sourceId) &&
+                !sourceIds.has(entry.sourceId!)
+              }
+              downloadProgress={downloads[entry.id]}
               onOpen={() => {
                 if (busyRef.current) {
                   notify('正在导入，请稍候')
@@ -743,7 +875,64 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
         <>
           <div className="card-menu-backdrop" onClick={() => setMenu(null)} />
           <div className="card-menu" style={{ left: menu.x, top: menu.y }} role="menu">
+            {menu.entry.format === 'network' && (
+              <>
+                <button
+                  disabled={actionBusy}
+                  onClick={() => {
+                    setMenu(null)
+                    void runUpdateToc(menu.entry)
+                  }}
+                >
+                  更新目录
+                </button>
+                {downloading.has(menu.entry.id) ? (
+                  <button
+                    onClick={() => {
+                      setMenu(null)
+                      void window.api.cancelDownload(menu.entry.id)
+                    }}
+                  >
+                    取消下载
+                  </button>
+                ) : (
+                  <button
+                    disabled={actionBusy}
+                    onClick={() => {
+                      setMenu(null)
+                      setDownloading((current) => new Set(current).add(menu.entry.id))
+                      void window.api.downloadAll(menu.entry.id).catch((reason) => {
+                        setDownloading((current) => {
+                          const next = new Set(current)
+                          next.delete(menu.entry.id)
+                          return next
+                        })
+                        notify(`下载失败：${errorText(reason)}`)
+                      })
+                    }}
+                  >
+                    下载全本
+                  </button>
+                )}
+                <button
+                  disabled={menu.entry.downloadState !== 'complete' || actionBusy}
+                  title={
+                    menu.entry.downloadState !== 'complete' ? '未下载全本，无法转为本地书' : undefined
+                  }
+                  onClick={() => {
+                    setDialog({ kind: 'convert', entry: menu.entry })
+                    setMenu(null)
+                  }}
+                >
+                  {menu.entry.downloadState === 'complete'
+                    ? '转为本地书…'
+                    : '转为本地书（需下载全本）'}
+                </button>
+              </>
+            )}
             <button
+              disabled={menu.entry.format === 'network'}
+              title={menu.entry.format === 'network' ? '网络书没有原始文件' : undefined}
               onClick={() => {
                 void openSource(menu.entry)
                 setMenu(null)
@@ -761,7 +950,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
             </button>
             <button
               onClick={() => {
-                setDialog({ kind: 'reclean', entry: menu.entry })
+                openLocalDialog(menu.entry, { kind: 'reclean', entry: menu.entry })
                 setMenu(null)
               }}
             >
@@ -769,7 +958,7 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
             </button>
             <button
               onClick={() => {
-                setDialog({ kind: 'resplit', entry: menu.entry })
+                openLocalDialog(menu.entry, { kind: 'resplit', entry: menu.entry })
                 setMenu(null)
               }}
             >
@@ -777,22 +966,28 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
             </button>
             <button
               onClick={() => {
-                setDialog({ kind: 'markers', entry: menu.entry })
+                openLocalDialog(menu.entry, { kind: 'markers', entry: menu.entry })
                 setMenu(null)
               }}
             >
               标记章节…
             </button>
-            {menu.entry.format !== 'epub' && (
-              <button
-                onClick={() => {
-                  setDialog({ kind: 'encoding', entry: menu.entry })
-                  setMenu(null)
-                }}
-              >
-                切换编码…
-              </button>
-            )}
+            {menu.entry.format !== 'epub' &&
+              menu.entry.format !== 'network' &&
+              (menu.entry.sourceName ? (
+                <button disabled title="网络书转换后不支持切换编码">
+                  切换编码…
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setDialog({ kind: 'encoding', entry: menu.entry })
+                    setMenu(null)
+                  }}
+                >
+                  切换编码…
+                </button>
+              ))}
             <button
               className="danger"
               onClick={() => {
@@ -987,6 +1182,30 @@ export default function Library({ onOpen }: { onOpen: (bookId: string) => void }
           <p className="modal-note">
             会移除书架记录和软件内的书籍数据；你导入的原始文件不会被删除。
           </p>
+        </Modal>
+      )}
+
+      {dialog?.kind === 'convert' && (
+        <Modal
+          title="转为本地书"
+          onClose={() => setDialog(null)}
+          footer={
+            <>
+              <button className="modal-button ghost" onClick={() => setDialog(null)}>
+                取消
+              </button>
+              <button
+                className="modal-button"
+                disabled={actionBusy}
+                onClick={() => void confirmConvert(dialog.entry)}
+              >
+                转为本地书
+              </button>
+            </>
+          }
+        >
+          <p>将把已缓存正文写成普通 TXT 书，之后可重新清洗、重新切章和合并。</p>
+          <p>网络来源信息会保留为来源标记，但不再自动更新目录或下载。</p>
         </Modal>
       )}
 

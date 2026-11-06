@@ -21,6 +21,7 @@ export default function BookInfo({
       ? `${files.slice(0, 3).join('、')} 等 ${files.length} 个文件`
       : files.join('、')
   const epub = entry.format === 'epub'
+  const network = entry.format === 'network'
   return (
     <dl className="info-list">
       <dt>书名</dt>
@@ -34,10 +35,21 @@ export default function BookInfo({
       <dt>源文件</dt>
       <dd>{fileText}</dd>
       <dt>格式</dt>
-      <dd>{epub ? 'EPUB' : 'TXT'}</dd>
+      <dd>{network ? '网络' : epub ? 'EPUB' : 'TXT'}</dd>
+      {network && (
+        <>
+          <dt>书源</dt>
+          <dd>{entry.sourceName || '未知书源'}</dd>
+          <dt>缓存</dt>
+          <dd>
+            {entry.networkCache?.cached ?? 0}/{entry.networkCache?.total ?? 0} 章
+            {entry.downloadState === 'complete' ? ' · 已下载全本' : ' · 未下载完'}
+          </dd>
+        </>
+      )}
       <dt>章节</dt>
       <dd>{entry.chapterCount} 章</dd>
-      {!epub && (
+      {!epub && !network && (
         <>
           <dt>编码</dt>
           <dd>{entry.encoding}</dd>

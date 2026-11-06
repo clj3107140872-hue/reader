@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import type { LibraryEntry } from '../../../core/model'
 import { useBookCover } from '../hooks/useBookCover'
+import NetworkBookBadge from './NetworkBookBadge'
 
 interface BookCardProps {
   entry: LibraryEntry
@@ -11,6 +12,8 @@ interface BookCardProps {
   selectable?: boolean
   selected?: boolean
   onToggle?: () => void
+  sourceMissing?: boolean
+  downloadProgress?: { done: number; total: number }
 }
 
 function coverInitial(title: string): string {
@@ -25,7 +28,9 @@ export default function BookCard({
   onHoverEnd,
   selectable = false,
   selected = false,
-  onToggle
+  onToggle,
+  sourceMissing = false,
+  downloadProgress
 }: BookCardProps) {
   const cardRef = useRef<HTMLElement>(null)
   const cover = useBookCover(entry.hasCover ? entry.id : null)
@@ -70,9 +75,15 @@ export default function BookCard({
             {entry.title}
           </div>
           <div className="sub">
-            {entry.format === 'epub' ? 'EPUB' : 'TXT'} · {entry.chapterCount} 章
-            {entry.format === 'epub' ? '' : ` · ${entry.encoding}`}
+            {entry.format === 'network' ? '网络' : entry.format === 'epub' ? 'EPUB' : 'TXT'} ·{' '}
+            {entry.chapterCount} 章
+            {entry.format === 'epub' || entry.format === 'network' ? '' : ` · ${entry.encoding}`}
           </div>
+          <NetworkBookBadge
+            entry={entry}
+            sourceMissing={sourceMissing}
+            progress={downloadProgress}
+          />
           <div className="sub">
             进度 {entry.progressPercent}% · 广告 {entry.stats.adLinesRemoved} 行 · 重复段{' '}
             {entry.stats.duplicateParagraphsMerged}
