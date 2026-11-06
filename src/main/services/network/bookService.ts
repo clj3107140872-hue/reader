@@ -1,0 +1,260 @@
+import { createHash, randomUUID } from 'node:crypto'
+import { cleanChapters } from '../../../core/cleaning'
+import type { CleaningRunConfig } from '../../../core/cleaning'
+import { downloadState, networkCacheFor } from '../../../core/booksource/quality'
+import type { BookMeta, ChapterMeta, LibraryEntry } from '../../../core/model'
+import { chapterTitleHash } from '../../../core/chapters'
+import { normalizeBookTitle } from '../../../core/sameBook'
+import type { AddNetworkBookInput } from '../../../shared/api'
+import type { BookRepository } from '../../storage/book'
+import type { LibraryRepository } from '../../storage/library'
+import type { NetworkBookRepository } from '../../storage/networkBook'
+import { assertBookId } from '../../bookId'
+import type { SourceReader } from './sourceReader'
+import type { SourceService } from './sourceService'
+import { KeyedLocks, Semaphore } from './limits'
+
+export interface NetworkBookDeps {
+  root: string
+  sources: SourceService
+  reader: SourceReader
+  networkBooks: NetworkBookRepository
+  books: BookRepository
+  library: LibraryRepository
+  cleaning: () => CleaningRunConfig
+  /** False when the user turned networking off; cached chapters stay readable. */
+  allowNetwork?: () => boolean
+}
+
+function safeFileName(title: string): string {
+  const base = title.replace(/[\\/:*?"<>|\r\n]/g, '_').trim().slice(0, 80) || '网络书'
+  return `${base}.txt`
+}
+
+function chapterFromToc(
+  title: string,
+  url: string,
+  level: 'chapter' | 'volume',
+  index: number
+): ChapterMeta {
+  return {
+    index,
+    title,
+    level,
+    titleHash: chapterTitleHash(title),
+    startLine: 0,
+    charCount: 0,
+    simhash: '',
+    flags: {},
+    ...(url ? { url } : {})
+  }
+}
+
+export class NetworkBookService {
+  readonly sources: SourceService
+  private readonly reader: SourceReader
+  private readonly networkBooks: NetworkBookRepository
+  private readonly books: BookRepository
+  private readonly library: LibraryRepository
+  private readonly cleaning: () => CleaningRunConfig
+  private readonly allowNetwork: () => boolean
+  private readonly root: string
+  private readonly locks = new KeyedLocks()
+  private readonly bookSemaphore = new Semaphore(2)
+  private readonly readSemaphore = new Semaphore(6)
+  private readonly chapterRequests = new Map<string, Promise<string>>()
+  private readonly downloadJobs = new Map<
+    string,
+    { controller: AbortController; done: Promise<unknown> }
+  >()
+
+  constructor(deps: NetworkBookDeps) {
+    this.root = deps.root
+    this.sources = deps.sources
+    this.reader = deps.reader
+    this.networkBooks = deps.networkBooks
+    this.books = deps.books
+    this.library = deps.library
+    this.cleaning = deps.cleaning
+    this.allowNetwork = deps.allowNetwork ?? (() => true)
+  }
+
+  private ensureNetwork(): void {
+    if (!this.allowNetwork()) {
+      throw new Error('已关闭联网功能，请到设置里打开后再搜索/更新/下载')
+    }
+  }
+
+  async add(input: AddNetworkBookInput): Promise<LibraryEntry> {
+    this.ensureNetwork()
+    const source = await this.sources.require(input.sourceId)
+    const info = await this.reader.info(source, input.bookUrl)
+    const title = (info.title || input.title || '').trim()
+    if (!title) throw new Error('没有从书源拿到书名')
+    const toc = await this.reader.toc(source, {
+      bookUrl: info.bookUrl,
+      tocUrl: info.tocUrl || info.bookUrl
+    })
+    const chapters = toc.chapters.map((chapter, index) =>
+      chapterFromToc(chapter.title, chapter.url, chapter.level, index)
+    )
+    if (chapters.length === 0) throw new Error('书源没有返回目录')
+    const contentChapterCount = chapters.filter(
+      (chapter) => chapter.level !== 'volume' && chapter.url
+    ).length
+    if (contentChapterCount === 0) throw new Error('书源没有返回可读章节')
+    const id = randomUUID()
+    const now = new Date().toISOString()
+    const meta: BookMeta = {
+      version: 1,
+      id,
+      title,
+      encoding: 'utf-8',
+      format: 'network',
+      chapters,
+      createdAt: now,
+      ...(info.author || input.author ? { author: info.author || input.author } : {}),
+      ...(info.intro ? { intro: info.intro } : {}),
+      ...(info.kind ? { kind: info.kind } : {}),
+      network: {
+        sourceId: input.sourceId,
+        sourceUrl: source.url,
+        sourceName: source.name,
+        bookUrl: info.bookUrl,
+        tocUrl: info.tocUrl || info.bookUrl,
+        ...(info.lastChapter ? { lastChapter: info.lastChapter } : {}),
+        lastTocAt: now,
+        lastCheckAt: now,
+        lastDownloadAt: null
+      }
+    }
+    await this.networkBooks.create(meta)
+    // v1 不下载网络封面：封面区显示书名首字，避免引入二进制响应处理。
+    const entry: LibraryEntry = {
+      id,
+      title,
+      format: 'network',
+      ...(meta.author ? { author: meta.author } : {}),
+      ...(meta.intro ? { intro: meta.intro } : {}),
+      ...(meta.kind ? { kind: meta.kind } : {}),
+      sourceId: input.sourceId,
+      sourceName: source.name,
+      normalizedTitle: normalizeBookTitle(safeFileName(title)),
+      sourceFileName: safeFileName(title),
+      fileHash: createHash('sha256').update(`network:${input.sourceId}:${info.bookUrl}`).digest('hex'),
+      encoding: 'utf-8',
+      importedAt: now,
+      lastReadAt: null,
+      chapterCount: chapters.length,
+      progressPercent: 0,
+      stats: {
+        adLinesRemoved: 0,
+        duplicateParagraphsMerged: 0,
+        suspectedDuplicateChapters: 0
+      },
+      networkCache: { cached: 0, total: contentChapterCount },
+      downloadState: 'none',
+      lastUpdateAt: now
+    }
+    await this.library.add(entry)
+    return entry
+  }
+
+  async readChapter(id: string, index: number): Promise<{ text: string; cached: boolean }> {
+    assertBookId(id)
+    const cached = await this.networkBooks.readChapterText(id, index)
+    if (cached) return { text: cached, cached: true }
+    this.ensureNetwork()
+    const key = `${id}:${index}`
+    const existing = this.chapterRequests.get(key)
+    if (existing) return { text: await existing, cached: false }
+    const request = this.locks.run(key, () =>
+      this.bookSemaphore.run(() =>
+        this.readSemaphore.run(async () => {
+          const again = await this.networkBooks.readChapterText(id, index)
+          if (again) return again
+          const meta = await this.networkBooks.readMeta(id)
+          if (meta.format !== 'network' || !meta.network) throw new Error('这不是网络书')
+          const chapter = meta.chapters[index]
+          if (!chapter) throw new Error('章节不存在')
+          if (!chapter.url) throw new Error('这一章没有正文地址')
+          const source = await this.sources.require(meta.network.sourceId)
+          const content = await this.reader.content(source, {
+            chapterUrl: chapter.url,
+            chapterName: chapter.title,
+            bookUrl: meta.network.bookUrl
+          })
+          if (!content.text.trim()) throw new Error('书源返回了空正文')
+          const cleaning = this.cleaning()
+          const cleaned = cleanChapters(
+            [
+              {
+                title: chapter.title,
+                level: 'chapter',
+                startLine: 0,
+                paragraphs: content.text.split(/\n{2,}/)
+              }
+            ],
+            cleaning.rules,
+            { adCleaning: cleaning.adCleaning }
+          ).chapters[0]
+          const text = cleaned.paragraphs.join('\n\n')
+          await this.networkBooks.writeChapter(id, index, content.text, text)
+          const info = await this.cacheInfo(id, meta)
+          await this.library.update(id, {
+            networkCache: info,
+            downloadState: downloadState(info.cached, info.total)
+          })
+          return text
+        })
+      )
+    )
+    this.chapterRequests.set(key, request)
+    try {
+      return { text: await request, cached: false }
+    } finally {
+      this.chapterRequests.delete(key)
+    }
+  }
+
+  async networkCacheOf(id: string): Promise<{ cached: number; total: number }> {
+    const meta = await this.networkBooks.readMeta(id)
+    return this.cacheInfo(id, meta)
+  }
+
+  private async cacheInfo(id: string, meta: BookMeta): Promise<{ cached: number; total: number }> {
+    const cached = await this.networkBooks.listCachedChapters(id)
+    return networkCacheFor(meta.chapters, new Set(cached))
+  }
+
+  async entryFor(id: string): Promise<LibraryEntry> {
+    const entry = (await this.library.list()).find((item) => item.id === id)
+    if (!entry) throw new Error('找不到这本书')
+    return entry
+  }
+
+  cancelBookTasks(id: string): void {
+    const job = this.downloadJobs.get(id)
+    if (job) job.controller.abort()
+  }
+
+  async relinkSources(): Promise<void> {
+    const sources = await this.sources.list()
+    const byUrl = new Map(sources.map((source) => [source.url, source]))
+    for (const entry of await this.library.list()) {
+      if (entry.format !== 'network' || !entry.sourceId) continue
+      const meta = await this.networkBooks.readMeta(entry.id)
+      if (!meta.network) continue
+      if (sources.some((source) => source.id === meta.network!.sourceId)) continue
+      const replacement = byUrl.get(meta.network.sourceUrl)
+      if (!replacement) continue
+      meta.network.sourceId = replacement.id
+      meta.network.sourceName = replacement.name
+      await this.networkBooks.writeMeta(entry.id, meta)
+      await this.library.update(entry.id, {
+        sourceId: replacement.id,
+        sourceName: replacement.name
+      })
+    }
+  }
+}
