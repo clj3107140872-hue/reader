@@ -52,6 +52,7 @@
 
 ## 发版
 
+- [ ] 更新 `dist/Reader-win-x64` 前用 `node scripts/app-status.cjs` 确认「未运行」（不要用 `tasklist`，僵尸条目会误导）；验收实例用 `window.close()` 正常关闭，不强杀。
 - [ ] `npm test`（全绿）、`npm run typecheck`、`npm run build`。
 - [ ] 打包版离屏冒烟：能启动、`app start` 日志正常、窗口不可见（注意本机 shell 的 `ELECTRON_RUN_AS_NODE=1` 要先去掉）。
 - [ ] Release 附件能匿名下载（`curl -sIL` 返回 200），校验值与说明一致。
