@@ -253,6 +253,10 @@ export interface SearchResults {
   warnings: string[]
   truncated: boolean
   cancelled: boolean
+  /** 网络书只搜索了已缓存章节。 */
+  cachedOnly: boolean
+  /** 网络书因未缓存而跳过的章节数。 */
+  skippedUncached: number
 }
 
 export interface WindowBounds {

@@ -81,6 +81,8 @@ describe('SearchService', () => {
     expect(result.hits[0].chapterKey).toBe('h1')
     expect(result.hits[0].excerpt).toContain('正文')
     expect(result.cancelled).toBe(false)
+    expect(result.cachedOnly).toBe(false)
+    expect(result.skippedUncached).toBe(0)
   })
 
   it('treats regular expression characters as literal text', async () => {

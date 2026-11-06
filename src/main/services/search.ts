@@ -2,6 +2,7 @@ import type { SearchHit, SearchProgress, SearchResults } from '../../shared/api'
 import { splitParagraphs } from '../../core/paragraphs'
 import { chapterFromLines } from '../../core/reprocess'
 import type { BookRepository } from '../storage/book'
+import type { NetworkBookRepository } from '../storage/networkBook'
 import { assertBookId } from '../bookId'
 
 const MAX_HITS = 300
@@ -9,7 +10,10 @@ const MAX_HITS = 300
 export class SearchService {
   private readonly cancelled = new Set<string>()
 
-  constructor(private readonly books: BookRepository) {}
+  constructor(
+    private readonly books: BookRepository,
+    private readonly networkBooks?: NetworkBookRepository
+  ) {}
 
   cancel(token: string): void {
     this.cancelled.add(token)
@@ -23,37 +27,63 @@ export class SearchService {
   ): Promise<SearchResults> {
     assertBookId(id)
     const meta = await this.books.readMeta(id)
+    const network = meta.format === 'network'
+    const cached =
+      network && this.networkBooks
+        ? new Set(await this.networkBooks.listCachedChapters(id))
+        : null
+    const searchable = network
+      ? meta.chapters.filter(
+          (chapter) => chapter.level !== 'volume' && chapter.url && cached?.has(chapter.index)
+        )
+      : meta.chapters
+    const indexes = searchable.map((chapter) => chapter.index)
+    const contentCount = network
+      ? meta.chapters.filter((chapter) => chapter.level !== 'volume' && chapter.url).length
+      : meta.chapters.length
+    const skippedUncached = network ? contentCount - indexes.length : 0
+    const warnings: string[] = []
+    if (network) {
+      warnings.push(`仅搜索已缓存章节（${indexes.length}/${contentCount} 章）`)
+    }
+    const base = { token, warnings, cachedOnly: network, skippedUncached }
     const needle = query.trim().toLowerCase()
     const hits: SearchHit[] = []
-    const warnings: string[] = []
-    if (!needle) return { token, hits, warnings, truncated: false, cancelled: false }
+    if (!needle) return { ...base, hits, truncated: false, cancelled: false }
 
     // Loaded only when a chapter file is unusable; null means it is gone too.
     let sourceText: string | null | undefined
-    for (let index = 0; index < meta.chapters.length; index++) {
+    for (let position = 0; position < indexes.length; position++) {
       if (this.cancelled.delete(token)) {
-        return { token, hits, warnings, truncated: false, cancelled: true }
+        return { ...base, hits, truncated: false, cancelled: true }
       }
+      const index = indexes[position]
 
       let text: string | null
       try {
         text = await this.books.readChapter(id, index)
       } catch {
-        // Rebuild below from the pre-cleaning source that every book keeps.
-        if (sourceText === undefined) {
-          sourceText = await this.books.readSource(id).catch(() => null)
-        }
-        const title = meta.chapters[index].title
-        const rebuilt =
-          sourceText === null
-            ? ''
-            : chapterFromLines(sourceText, meta, index).paragraphs.join('\n\n').trim()
-        if (rebuilt === '') {
-          warnings.push(`第 ${index + 1} 章《${title}》文件缺失且无法从原文重建，已跳过`)
+        if (network) {
+          // 网络书没有 source.txt，缓存文件读失败就跳过这一章。
+          warnings.push(`第 ${index + 1} 章《${meta.chapters[index].title}》读取失败，已跳过`)
           text = null
         } else {
-          warnings.push(`第 ${index + 1} 章《${title}》文件缺失，已从原文重建`)
-          text = rebuilt
+          // Rebuild below from the pre-cleaning source that every book keeps.
+          if (sourceText === undefined) {
+            sourceText = await this.books.readSource(id).catch(() => null)
+          }
+          const title = meta.chapters[index].title
+          const rebuilt =
+            sourceText === null
+              ? ''
+              : chapterFromLines(sourceText, meta, index).paragraphs.join('\n\n').trim()
+          if (rebuilt === '') {
+            warnings.push(`第 ${index + 1} 章《${title}》文件缺失且无法从原文重建，已跳过`)
+            text = null
+          } else {
+            warnings.push(`第 ${index + 1} 章《${title}》文件缺失，已从原文重建`)
+            text = rebuilt
+          }
         }
       }
 
@@ -66,7 +96,7 @@ export class SearchService {
           if (at < 0) continue
           // Truncated means a 301st match exists; keep scanning until one is found.
           if (hits.length >= MAX_HITS) {
-            return { token, hits, warnings, truncated: true, cancelled: false }
+            return { ...base, hits, truncated: true, cancelled: false }
           }
 
           const start = Math.max(0, at - 20)
@@ -80,11 +110,11 @@ export class SearchService {
         }
       }
 
-      if ((index + 1) % 10 === 0 || index === meta.chapters.length - 1) {
-        onProgress({ token, scanned: index + 1, total: meta.chapters.length })
+      if ((position + 1) % 10 === 0 || position === indexes.length - 1) {
+        onProgress({ token, scanned: position + 1, total: indexes.length })
       }
     }
 
-    return { token, hits, warnings, truncated: false, cancelled: false }
+    return { ...base, hits, truncated: false, cancelled: false }
   }
 }

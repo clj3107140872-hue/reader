@@ -4,6 +4,7 @@ import { chapterFromLines } from '../../core/reprocess'
 import type { NewBookmark, OpenBookPayload } from '../../shared/api'
 import type { BookRepository } from '../storage/book'
 import type { LibraryRepository } from '../storage/library'
+import type { NetworkBookRepository } from '../storage/networkBook'
 import { assertBookId } from '../bookId'
 
 const MISSING_CHAPTER_PLACEHOLDER =
@@ -14,7 +15,8 @@ export class ReaderService {
 
   constructor(
     private readonly library: LibraryRepository,
-    private readonly books: BookRepository
+    private readonly books: BookRepository,
+    private readonly networkBooks?: NetworkBookRepository
   ) {}
 
   private async locked<T>(id: string, task: () => Promise<T>): Promise<T> {
@@ -30,6 +32,21 @@ export class ReaderService {
   async open(id: string): Promise<OpenBookPayload> {
     assertBookId(id)
     const meta = await this.books.readMeta(id)
+    const stored = await this.books.readProgress(id)
+    if (meta.format === 'network') {
+      const cachedChapters = this.networkBooks
+        ? await this.networkBooks.listCachedChapters(id)
+        : []
+      return {
+        meta,
+        contentMode: 'lazy',
+        chapters: [],
+        cachedChapters,
+        warnings: [],
+        progress: stored.progress,
+        bookmarks: stored.bookmarks
+      }
+    }
     const chapters: string[] = []
     const warnings: string[] = []
     // Loaded only when a chapter file is unusable; null means it is gone too.
@@ -60,7 +77,6 @@ export class ReaderService {
         warnings.push(`第 ${chapter.index + 1} 章《${chapter.title}》文件缺失，已从原文重建`)
       }
     }
-    const stored = await this.books.readProgress(id)
     return {
       meta,
       contentMode: 'eager',
