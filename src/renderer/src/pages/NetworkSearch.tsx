@@ -116,7 +116,7 @@ export default function NetworkSearch({
     const offError = window.api.onNetworkSearchError((event) => {
       if (event.requestId !== requestRef.current) return
       setSearching(false)
-      setMessage(`搜索失败：${event.message}`)
+      setMessage(`搜索失败：${errorText(event.message)}`)
     })
     return () => { offSource(); offResults(); offDone(); offError() }
   }, [])

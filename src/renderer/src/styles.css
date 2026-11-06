@@ -1717,6 +1717,17 @@ body[data-slacking='code'] { background: #121314; }
 /* 网络搜索：结果按书分组，最佳来源置顶，其他来源可展开。 */
 .network-search-bar { display: flex; gap: 8px; padding: 12px 16px; }
 .network-search-bar input { flex: 1; min-width: 0; }
+.network-search-bar button,
+.network-search-bar select {
+  border: 1px solid #e2ddd2;
+  border-radius: 6px;
+  background: #fff;
+  color: #2b2b2b;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.network-search-bar button:disabled { opacity: 0.55; cursor: default; }
 .network-results { display: grid; gap: 10px; padding: 0 16px 24px; overflow: auto; }
 .network-group { border: 1px solid #e2ddd2; border-radius: 10px; background: #fff; padding: 10px; }
 .network-result { display: flex; gap: 12px; justify-content: space-between; padding: 8px 4px; border-top: 1px solid #e2ddd2; }
