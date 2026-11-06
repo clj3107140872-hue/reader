@@ -36,6 +36,8 @@ export interface SearchEmitter {
 export class NetworkSearchService {
   private readonly jobs = new Map<string, { controller: AbortController; cancelled: boolean }>()
   private readonly inFlight = new Set<string>()
+  /** 每个书源当前搜索请求的 controller，删除/停用书源时按书源中止。 */
+  private readonly sourceControllers = new Map<string, AbortController>()
 
   constructor(
     private readonly sources: SourceService,
@@ -50,6 +52,11 @@ export class NetworkSearchService {
       job.cancelled = true
       job.controller.abort()
     }
+  }
+
+  /** 中止某个书源正在进行的搜索（书源被删除或停用）。 */
+  cancelSource(sourceId: string): void {
+    this.sourceControllers.get(sourceId)?.abort()
   }
 
   async search(request: NetworkSearchRequest, emit: SearchEmitter): Promise<NetworkSearchDone> {
@@ -97,12 +104,20 @@ export class NetworkSearchService {
       const runOne = async (item: SourceListItem): Promise<void> => {
         if (job.cancelled) return
         const started = Date.now()
+        // 每个书源一个独立 controller：删除/停用书源只中止它自己的请求，
+        // 整个搜索取消时再通过作业 controller 的 abort 事件转给它。
+        const sourceController = new AbortController()
+        this.sourceControllers.set(item.id, sourceController)
+        const relayCancel = (): void => sourceController.abort()
+        job.controller.signal.addEventListener('abort', relayCancel, { once: true })
         try {
           const source = await this.sources.require(item.id)
-          const page = await this.reader.search(source, keyword, 1, job.controller.signal)
+          if (sourceController.signal.aborted) return
+          const page = await this.reader.search(source, keyword, 1, sourceController.signal)
           // A retried fetch can resolve after cancellation; drop its results
-          // instead of recording a success for a search the user cancelled.
-          if (job.cancelled) return
+          // instead of recording a success for a search the user cancelled or
+          // a source that was deleted/disabled mid-search.
+          if (job.cancelled || sourceController.signal.aborted) return
           const results = page.slice(0, PER_SOURCE_LIMIT).map((entry) => ({
             sourceId: item.id,
             sourceName: item.name,
@@ -132,7 +147,7 @@ export class NetworkSearchService {
             ms: Date.now() - started
           })
         } catch (error) {
-          if (job.cancelled) return
+          if (job.cancelled || sourceController.signal.aborted) return
           failed++
           const message = messageOf(error)
           await this.store.record(item.id, 'search', 'error', Date.now() - started, message)
@@ -146,9 +161,16 @@ export class NetworkSearchService {
             message
           })
         } finally {
-          // A cancelled source was not searched; do not count it.
+          job.controller.signal.removeEventListener('abort', relayCancel)
+          // A later search for the same source may already own the map entry.
+          if (this.sourceControllers.get(item.id) === sourceController) {
+            this.sourceControllers.delete(item.id)
+          }
+          // A source skipped by source-level cancellation was not searched:
+          // drop it from `remaining` without counting it as searched. A whole
+          // job cancellation keeps the existing behaviour (no counting).
           if (!job.cancelled) {
-            searched++
+            if (!sourceController.signal.aborted) searched++
             remaining--
           }
         }

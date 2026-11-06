@@ -75,6 +75,10 @@ export class NetworkBookService {
   private readonly readSemaphore = new Semaphore(6)
   private readonly chapterRequests = new Map<string, Promise<string>>()
   private readonly converting = new Set<string>()
+  /** 正在拉取目录请求的 controller，删除/停用书源时按书中止。 */
+  private readonly tocControllers = new Map<string, AbortController>()
+  /** 目录请求被书源级取消时的原因；普通中止（如删书）不写这里。 */
+  private readonly tocCancelReasons = new Map<string, 'source-deleted' | 'source-disabled'>()
   private readonly downloadJobs = new Map<
     string,
     {
@@ -396,32 +400,53 @@ export class NetworkBookService {
       const meta = await this.networkBooks.readMeta(id)
       if (meta.format !== 'network' || !meta.network) throw new Error('这不是网络书')
       const source = await this.sources.require(meta.network.sourceId)
-      const toc = await this.reader.toc(source, {
-        bookUrl: meta.network.bookUrl,
-        tocUrl: meta.network.tocUrl
-      })
-      const previousCount = meta.chapters.length
-      const result = diffToc(meta.chapters, toc.chapters)
-      meta.chapters = result.chapters
-      meta.network.lastTocAt = new Date().toISOString()
-      meta.network.lastCheckAt = meta.network.lastTocAt
-      if (result.lastChapter) meta.network.lastChapter = result.lastChapter
-      await this.networkBooks.writeMeta(id, meta)
-      const cache = await this.cacheInfo(id, meta)
-      const addedContent = result.chapters
-        .slice(previousCount)
-        .some((chapter) => chapter.level !== 'volume')
-      await this.library.update(id, {
-        chapterCount: meta.chapters.length,
-        networkCache: cache,
-        downloadState: downloadState(cache.cached, cache.total),
-        ...(addedContent ? { lastUpdateAt: meta.network.lastTocAt } : {})
-      })
-      return {
-        added: result.added,
-        total: meta.chapters.length,
-        warnings: toc.warnings,
-        ...(result.lastChapter ? { lastChapter: result.lastChapter } : {})
+      const controller = new AbortController()
+      this.tocControllers.set(id, controller)
+      try {
+        const toc = await this.reader.toc(
+          source,
+          {
+            bookUrl: meta.network.bookUrl,
+            tocUrl: meta.network.tocUrl
+          },
+          controller.signal
+        )
+        const cancelReason = this.tocCancelReasons.get(id)
+        if (cancelReason) {
+          throw new Error(cancelReason === 'source-deleted' ? '书源已删除' : '书源已停用')
+        }
+        const previousCount = meta.chapters.length
+        const result = diffToc(meta.chapters, toc.chapters)
+        meta.chapters = result.chapters
+        meta.network.lastTocAt = new Date().toISOString()
+        meta.network.lastCheckAt = meta.network.lastTocAt
+        if (result.lastChapter) meta.network.lastChapter = result.lastChapter
+        await this.networkBooks.writeMeta(id, meta)
+        const cache = await this.cacheInfo(id, meta)
+        const addedContent = result.chapters
+          .slice(previousCount)
+          .some((chapter) => chapter.level !== 'volume')
+        await this.library.update(id, {
+          chapterCount: meta.chapters.length,
+          networkCache: cache,
+          downloadState: downloadState(cache.cached, cache.total),
+          ...(addedContent ? { lastUpdateAt: meta.network.lastTocAt } : {})
+        })
+        return {
+          added: result.added,
+          total: meta.chapters.length,
+          warnings: toc.warnings,
+          ...(result.lastChapter ? { lastChapter: result.lastChapter } : {})
+        }
+      } catch (error) {
+        const cancelReason = this.tocCancelReasons.get(id)
+        if (cancelReason) {
+          throw new Error(cancelReason === 'source-deleted' ? '书源已删除' : '书源已停用')
+        }
+        throw error
+      } finally {
+        if (this.tocControllers.get(id) === controller) this.tocControllers.delete(id)
+        this.tocCancelReasons.delete(id)
       }
     })
   }
@@ -545,9 +570,28 @@ export class NetworkBookService {
 
   cancelBookTasks(id: string, reason?: 'source-deleted' | 'source-disabled'): void {
     const job = this.downloadJobs.get(id)
-    if (!job) return
-    if (reason) job.reason = reason
-    job.controller.abort()
+    if (job) {
+      if (reason) job.reason = reason
+      job.controller.abort()
+    }
+    // 删书（无 reason）也要停掉目录请求，但不报「书源已删除/停用」。
+    const toc = this.tocControllers.get(id)
+    if (toc) {
+      if (reason) this.tocCancelReasons.set(id, reason)
+      toc.abort()
+    }
+  }
+
+  /** 书源被删除/停用：中止仍指向该来源的所有网络书的下载和目录请求。 */
+  async cancelSourceTasks(
+    sourceId: string,
+    reason: 'source-deleted' | 'source-disabled'
+  ): Promise<void> {
+    for (const entry of await this.library.list()) {
+      if (entry.format === 'network' && entry.sourceId === sourceId) {
+        this.cancelBookTasks(entry.id, reason)
+      }
+    }
   }
 
   async relinkSources(): Promise<void> {

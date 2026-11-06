@@ -68,6 +68,39 @@ describe('NetworkSearchService', () => {
     expect(cancelled.searched).toBe(0)
   })
 
+  it('skips a source cancelled at source level instead of counting it failed', async () => {
+    const server = await startFakeServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end('<div class="book"><a class="name" href="/b/1">斗破苍穹</a><span class="author">土豆</span></div>')
+    })
+    close = server.close
+    const store = new SourceStore(root)
+    await store.importParsed([{
+      definition: {
+        bookSourceName: '源A', bookSourceUrl: server.url, searchUrl: '/s?q={{key}}',
+        ruleSearch: { bookList: '.book', name: '.name', author: '.author', bookUrl: '.name@href' },
+        ruleToc: { chapterList: '.c', chapterName: 'a', chapterUrl: 'a@href' },
+        ruleContent: { content: '#c' }
+      },
+      name: '源A', url: server.url, group: '', searchUrl: '/s?q={{key}}', header: {}, customOrder: 0,
+      compat: { level: 'full', issues: [] }
+    }])
+    const storeService = new SourceService(store, new HttpClient(), new LibraryRepository(root))
+    const service = new NetworkSearchService(storeService, store, new SourceReader(new HttpClient()), new LibraryRepository(root))
+    const [source] = await storeService.list()
+    await store.setFlags(source.id, { starred: true })
+    server.delayMs = 100
+    const running = service.search(
+      { requestId: 'r-source-cancel', keyword: '斗破', scope: 'quality' },
+      { source: () => {}, results: () => {} }
+    )
+    setTimeout(() => service.cancelSource(source.id), 20)
+    const done = await running
+    expect(done.failed).toBe(0)
+    expect(done.searched).toBe(0)
+    expect(done.groups).toHaveLength(0)
+  })
+
   it('maps non-Chinese errors to a search failure message and keeps Chinese ones', async () => {
     const now = new Date().toISOString()
     const items = [

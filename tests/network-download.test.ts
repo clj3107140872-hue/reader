@@ -116,6 +116,19 @@ describe('NetworkBookService downloads', () => {
     expect((await service.networkCacheOf(entry.id)).cached).toBe(0)
   })
 
+  it('stops a running toc update when the source is deleted', async () => {
+    const { service, server, networkBooks } = await setup()
+    const sourceId = (await service.sources.list())[0].id
+    const entry = await service.add({ sourceId, bookUrl: `${server.url}/info` })
+    const before = await networkBooks.readMeta(entry.id)
+    server.delayMs = 100
+    const running = service.updateToc(entry.id)
+    setTimeout(() => void service.cancelSourceTasks(sourceId, 'source-deleted'), 20)
+    await expect(running).rejects.toThrow('书源已删除')
+    const after = await networkBooks.readMeta(entry.id)
+    expect(after.network?.lastTocAt).toBe(before.network?.lastTocAt)
+  })
+
   it('keeps state partial when some chapters fail', async () => {
     const { service, server } = await setup()
     const entry = await service.add({ sourceId: (await service.sources.list())[0].id, bookUrl: `${server.url}/info` })

@@ -668,18 +668,6 @@ if (hasSingleInstanceLock) {
         throw new Error('已关闭联网功能，请到设置里打开后再搜索/更新/下载')
       }
     }
-    // 书源被删除或停用时，把这本书正在跑的下载任务标记结束原因，剩余章节
-    // 由下载服务记为失败；已经缓存的章节保留。
-    const cancelSourceTasks = async (
-      sourceId: string,
-      reason: 'source-deleted' | 'source-disabled'
-    ): Promise<void> => {
-      for (const entry of await library.list()) {
-        if (entry.format === 'network' && entry.sourceId === sourceId) {
-          networkBookService.cancelBookTasks(entry.id, reason)
-        }
-      }
-    }
     ipcMain.handle('source:list', () => sourceService.list())
     ipcMain.handle('source:import', async (event, request: SourceImportRequest) => {
       if (request.kind === 'json') {
@@ -718,7 +706,8 @@ if (hasSingleInstanceLock) {
         flags as { enabled?: boolean; starred?: boolean; blacklisted?: boolean }
       )
       if ((flags as { enabled?: unknown }).enabled === false) {
-        await cancelSourceTasks(id, 'source-disabled')
+        await networkBookService.cancelSourceTasks(id, 'source-disabled')
+        networkSearch.cancelSource(id)
       }
       return result
     })
@@ -727,7 +716,8 @@ if (hasSingleInstanceLock) {
     )
     ipcMain.handle('source:delete', async (_event, id: unknown) => {
       if (typeof id !== 'string') throw new Error('无效的书源编号')
-      await cancelSourceTasks(id, 'source-deleted')
+      await networkBookService.cancelSourceTasks(id, 'source-deleted')
+      networkSearch.cancelSource(id)
       await sourceService.remove(id)
     })
     ipcMain.handle('network:search', (event, request: NetworkSearchRequest) => {
