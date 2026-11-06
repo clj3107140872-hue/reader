@@ -8,10 +8,15 @@ import {
 } from '../../shared/settings'
 import type { SettingsPatch } from '../../shared/settings'
 import Library from './pages/Library'
+import NetworkSearch from './pages/NetworkSearch'
 import Reader from './pages/Reader'
 import Sources from './pages/Sources'
 
-type View = { name: 'library' } | { name: 'reader'; bookId: string } | { name: 'sources' }
+type View =
+  | { name: 'library' }
+  | { name: 'reader'; bookId: string }
+  | { name: 'sources' }
+  | { name: 'network-search' }
 
 // A disguise window is created with the book and style in its URL, so the
 // first paint already looks right instead of flashing the normal reader.
@@ -129,11 +134,18 @@ export default function App() {
         />
       ) : view.name === 'sources' ? (
         <Sources onBack={() => setView({ name: 'library' })} />
+      ) : view.name === 'network-search' ? (
+        <NetworkSearch
+          networkEnabled={settings.network.enabled}
+          onBack={() => setView({ name: 'library' })}
+          onAdded={() => setView({ name: 'library' })}
+        />
       ) : (
         <Library
           networkEnabled={settings.network.enabled}
           onOpen={(bookId) => setView({ name: 'reader', bookId })}
           onOpenSources={() => setView({ name: 'sources' })}
+          onOpenNetworkSearch={() => setView({ name: 'network-search' })}
         />
       )}
     </>
