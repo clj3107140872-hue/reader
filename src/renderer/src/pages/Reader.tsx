@@ -1012,6 +1012,10 @@ export default function Reader({
   /** Flips one page, crossing into the neighbouring chapter at the ends. */
   const turnPage = useCallback(
     (delta: number): void => {
+      // A page turn is user navigation: drop any jump still waiting to land,
+      // otherwise it would fire later when the user returns to that chapter.
+      pendingTargetRef.current = null
+      userScrollRef.current = false
       if (!book) return
       const scroller = scrollRef.current
       const metrics = pagedMetricsRef.current
@@ -1112,13 +1116,16 @@ export default function Reader({
   )
 
   const handleScroll = useCallback((): void => {
+    // A pointer, touch, wheel or keyboard gesture marks the scroll events it
+    // produces as user input. Scrolls with no gesture behind them are the
+    // browser clamping scrollTop while placeholders load; they must neither
+    // cancel a pending jump nor rewrite the position being jumped to. The
+    // intent is consumed by the first scroll event so it cannot leak into
+    // later programmatic scrolls.
+    const userIntent = userScrollRef.current
+    userScrollRef.current = false
     if (pendingTargetRef.current) {
-      // A wheel or keyboard scroll cancels a jump that is still waiting for
-      // its chapter. Any other scroll here is the browser clamping scrollTop
-      // while the window slides to placeholders; it must neither cancel the
-      // jump nor rewrite the position being jumped to.
-      if (!userScrollRef.current) return
-      userScrollRef.current = false
+      if (!userIntent) return
       pendingTargetRef.current = null
     }
     if (rafRef.current !== 0) return
@@ -1325,10 +1332,12 @@ export default function Reader({
         if (event.ctrlKey || event.shiftKey) return
         if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
         event.preventDefault()
+        // A consumed wheel is user navigation; clear the target even when
+        // this notch moves zero lines (no scroll event will follow).
+        pendingTargetRef.current = null
         const step = wheelLineStep(event.deltaY, event.deltaMode, travel)
         travel = step.travel
         if (step.lines === 0) return
-        userScrollRef.current = true
         scroller.scrollTop += step.lines * CODE_ROW_HEIGHT
       }
 
@@ -1344,12 +1353,43 @@ export default function Reader({
       if (event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return
       if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
       event.preventDefault()
-      userScrollRef.current = true
+      // A consumed wheel is user navigation; clear the target even when this
+      // notch moves zero pixels (no scroll event will follow).
+      pendingTargetRef.current = null
       scroller.scrollTop += event.deltaY * WHEEL_DISTANCE_SCALE
     }
 
     target.addEventListener('wheel', handleWheel, { passive: false })
     return () => target.removeEventListener('wheel', handleWheel)
+  }, [book, style, paged])
+
+  // Pointer and touch gestures (scrollbar drag, touch scrolling, selection
+  // auto-scroll) move the view without a wheel event. Mark them as user
+  // intent so handleScroll accepts the scrolls they produce while a jump is
+  // pending instead of mistaking them for the browser's scrollTop clamp.
+  useEffect(() => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    const start = (): void => {
+      userScrollRef.current = true
+    }
+    const end = (): void => {
+      userScrollRef.current = false
+    }
+    scroller.addEventListener('pointerdown', start)
+    scroller.addEventListener('touchstart', start, { passive: true })
+    scroller.addEventListener('pointerup', end)
+    scroller.addEventListener('pointercancel', end)
+    scroller.addEventListener('touchend', end, { passive: true })
+    scroller.addEventListener('touchcancel', end, { passive: true })
+    return () => {
+      scroller.removeEventListener('pointerdown', start)
+      scroller.removeEventListener('touchstart', start)
+      scroller.removeEventListener('pointerup', end)
+      scroller.removeEventListener('pointercancel', end)
+      scroller.removeEventListener('touchend', end)
+      scroller.removeEventListener('touchcancel', end)
+    }
   }, [book, style, paged])
 
   const seek = (percent: number): void => {
