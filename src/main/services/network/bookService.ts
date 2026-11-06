@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { promises as fs } from 'node:fs'
+import { join } from 'node:path'
 import { cleanChapters } from '../../../core/cleaning'
 import type { CleaningRunConfig } from '../../../core/cleaning'
+import { buildBookDocuments } from '../../../core/compose'
 import { downloadState, networkCacheFor } from '../../../core/booksource/quality'
 import type {
   DownloadDone,
@@ -9,10 +12,11 @@ import type {
   UpdateTocResult
 } from '../../../core/booksource/model'
 import { diffToc } from '../../../core/booksource/toc'
-import type { BookMeta, ChapterMeta, LibraryEntry } from '../../../core/model'
+import type { BookMeta, ChapterMeta, CleanedChapter, LibraryEntry } from '../../../core/model'
 import { chapterTitleHash } from '../../../core/chapters'
+import { buildChapterMetas } from '../../../core/pipeline'
 import { normalizeBookTitle } from '../../../core/sameBook'
-import type { AddNetworkBookInput } from '../../../shared/api'
+import type { AddNetworkBookInput, ConvertToLocalResult } from '../../../shared/api'
 import type { BookRepository } from '../../storage/book'
 import type { LibraryRepository } from '../../storage/library'
 import type { NetworkBookRepository } from '../../storage/networkBook'
@@ -70,6 +74,7 @@ export class NetworkBookService {
   private readonly bookSemaphore = new Semaphore(2)
   private readonly readSemaphore = new Semaphore(6)
   private readonly chapterRequests = new Map<string, Promise<string>>()
+  private readonly converting = new Set<string>()
   private readonly downloadJobs = new Map<
     string,
     { controller: AbortController; done: Promise<unknown> }
@@ -169,6 +174,7 @@ export class NetworkBookService {
 
   async readChapter(id: string, index: number): Promise<{ text: string; cached: boolean }> {
     assertBookId(id)
+    if (this.converting.has(id)) throw new Error('正在转为本地书，请稍候')
     if (!Number.isInteger(index) || index < 0) throw new Error('章节不存在')
     const cached = await this.networkBooks.readChapterText(id, index)
     if (cached) return { text: cached, cached: true }
@@ -222,6 +228,124 @@ export class NetworkBookService {
       return { text: await request, cached: false }
     } finally {
       this.chapterRequests.delete(key)
+    }
+  }
+
+  async convertToLocal(id: string): Promise<ConvertToLocalResult> {
+    assertBookId(id)
+    if (this.converting.has(id)) throw new Error('正在转为本地书，请稍候')
+    this.converting.add(id)
+    this.cancelBookTasks(id)
+    try {
+      // 等正在读的章节落盘；之后新的读章请求会被 converting 挡住。
+      const pendingReads = [...this.chapterRequests.entries()]
+        .filter(([key]) => key.startsWith(`${id}:`))
+        .map(([, request]) => request.catch(() => undefined))
+      await Promise.all(pendingReads)
+
+      return await this.locks.run(`book:${id}`, async () => {
+        const meta = await this.networkBooks.readMeta(id)
+        if (meta.format !== 'network') throw new Error('这本书已经是本地书')
+        const cache = await this.cacheInfo(id, meta)
+        if (cache.total === 0 || cache.cached < cache.total) {
+          throw new Error('未下载全本，无法转为本地书')
+        }
+        const progress = await this.books.readProgress(id)
+        const bookDir = join(this.root, 'books', id)
+        const snapshot = join(this.root, '.convert', `${id}-${Date.now()}`)
+        await fs.mkdir(join(this.root, '.convert'), { recursive: true })
+        await fs.cp(bookDir, snapshot, { recursive: true })
+        const warnings: string[] = []
+        try {
+          const sourceChapters: CleanedChapter[] = []
+          const cleanedChapters: CleanedChapter[] = []
+          for (const chapter of meta.chapters) {
+            if (chapter.level === 'volume') {
+              const empty: CleanedChapter = {
+                title: chapter.title,
+                level: 'volume',
+                startLine: 0,
+                paragraphs: []
+              }
+              sourceChapters.push(empty)
+              cleanedChapters.push({ ...empty })
+              continue
+            }
+            const raw = await this.networkBooks.readRawChapter(id, chapter.index)
+            const cleaned = (await this.networkBooks.readChapterText(id, chapter.index)) ?? ''
+            if (!raw) {
+              warnings.push(`第 ${chapter.index + 1} 章《${chapter.title}》缺少原始正文，已用清洗后正文替代`)
+            }
+            const sourceParagraphs = (raw ?? cleaned)
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean)
+            if (sourceParagraphs[0] === chapter.title) sourceParagraphs.shift()
+            sourceChapters.push({
+              title: chapter.title,
+              level: chapter.level,
+              startLine: 0,
+              paragraphs: sourceParagraphs
+            })
+            cleanedChapters.push({
+              title: chapter.title,
+              level: chapter.level,
+              startLine: 0,
+              paragraphs: cleaned.split(/\n{2,}/).map((part) => part.trim()).filter(Boolean)
+            })
+          }
+
+          // source.txt 与每章 startLine 由 raw 正文生成；charCount/simhash
+          // 必须用清洗后正文，保证同书合并与重复章节检测正常。
+          const documents = buildBookDocuments({
+            id,
+            title: meta.title,
+            encoding: 'utf-8',
+            createdAt: meta.createdAt,
+            chapters: sourceChapters,
+            format: 'txt',
+            ...(meta.author ? { author: meta.author } : {}),
+            ...(meta.cover ? { cover: meta.cover } : {})
+          })
+          const cleanedMetas = buildChapterMetas(cleanedChapters)
+          const localMeta: BookMeta = {
+            ...documents.meta,
+            chapters: documents.meta.chapters.map((chapter, index) => ({
+              ...chapter,
+              charCount: cleanedMetas[index].charCount,
+              simhash: cleanedMetas[index].simhash,
+              flags: cleanedMetas[index].flags
+            })),
+            ...(meta.intro ? { intro: meta.intro } : {}),
+            ...(meta.kind ? { kind: meta.kind } : {})
+          }
+
+          await this.books.writeBook(
+            { meta: localMeta, sourceText: documents.sourceText, chapters: cleanedChapters },
+            { backup: false }
+          )
+          await this.books.writeProgress(id, progress)
+          await this.library.update(id, {
+            format: 'txt',
+            sourceId: undefined,
+            networkCache: undefined,
+            downloadState: undefined
+          })
+          return {
+            id,
+            chapterCount: localMeta.chapters.length,
+            warnings
+          }
+        } catch (reason) {
+          await fs.rm(bookDir, { recursive: true, force: true })
+          await fs.rename(snapshot, bookDir)
+          throw reason
+        } finally {
+          await fs.rm(snapshot, { recursive: true, force: true })
+        }
+      })
+    } finally {
+      this.converting.delete(id)
     }
   }
 
