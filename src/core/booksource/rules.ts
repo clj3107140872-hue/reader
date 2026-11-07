@@ -1,4 +1,6 @@
 import { load } from 'cheerio'
+import type { Cheerio, CheerioAPI } from 'cheerio'
+import type { AnyNode } from 'domhandler'
 import { JSONPath } from 'jsonpath-plus'
 
 export interface RuleContext {
@@ -37,7 +39,11 @@ export interface ParsedUrlOptions {
 }
 
 const TEMPLATE_RE = /\{\{([^{}]+)\}\}/g
-const SUFFIX_RE = /@(text|ownText|html|textNode|href|src)$/i
+const SUFFIX_RE = /@(textNodes|textNode|ownText|text|html|href|src)$/i
+// Legado also accepts the suffix on its own (chapterName "text", chapterUrl
+// "href"). Treating those as tag selectors silently dropped every chapter.
+const BARE_SUFFIX_RE = /^(textNodes|textNode|ownText|text|html|href|src)$/i
+const EXPLICIT_RULE_RE = /^@(json|xpath|css):/i
 
 function variableValue(key: string, ctx: RuleContext): string | undefined {
   switch (key) {
@@ -162,8 +168,18 @@ function splitTop(text: string, separator: string): string[] {
   return parts
 }
 
+interface SelectorStep {
+  selector: string
+  index: number | null
+  exclude: number | null
+}
+
 interface SegmentParts {
   selector: string
+  /** Set when the rule uses Legado's default selector chain syntax. */
+  steps: SelectorStep[] | null
+  /** True for a bare suffix rule such as "text" or "href". */
+  bare: boolean
   suffix: string
   index: number | null
   pattern?: string
@@ -175,6 +191,44 @@ function extractIndex(value: string): { selector: string; index: number | null }
   const match = /\.(-?\d+)$/.exec(value)
   if (!match) return { selector: value, index: null }
   return { selector: value.slice(0, match.index), index: Number(match[1]) }
+}
+
+function normalizeSuffix(value: string): string {
+  const lower = value.toLowerCase()
+  return lower === 'textnodes' ? 'textnode' : lower
+}
+
+/** Converts one Legado default-rule step (id.x / class.x / tag.x / tag). */
+function toCssStep(value: string): string {
+  const step = value.trim()
+  if (/^id\./i.test(step)) return `#${step.slice(3)}`
+  if (/^class\./i.test(step)) return `.${step.slice(6)}`
+  if (/^tag\./i.test(step)) return step.slice(4)
+  return step
+}
+
+function parseSteps(selector: string): SelectorStep[] {
+  return selector.split('@').map((part) => {
+    let value = part.trim()
+    let exclude: number | null = null
+    const bang = /!(-?\d+)$/.exec(value)
+    if (bang) {
+      exclude = Number(bang[1])
+      value = value.slice(0, bang.index)
+    }
+    const index = extractIndex(value)
+    return { selector: toCssStep(index.selector), index: index.index, exclude }
+  })
+}
+
+/**
+ * Legado rules may chain selector steps with "@" (id.chapterlist@p@a) and may
+ * prefix the first step with id./class./tag. Explicit @css:/@json:/@xpath:
+ * rules are never treated as chains.
+ */
+function hasLegadoSyntax(selector: string): boolean {
+  if (!selector || EXPLICIT_RULE_RE.test(selector)) return false
+  return selector.includes('@') || /^(id|class|tag)\./i.test(selector) || /!(-?\d+)$/.test(selector)
 }
 
 function parseSegment(raw: string): SegmentParts {
@@ -193,22 +247,53 @@ function parseSegment(raw: string): SegmentParts {
     selector = parts[0]
     pattern = parts[1]
     replacement = parts[2] ?? ''
+  } else if (parts.length === 2) {
+    // "rule##regex" means "remove what the regex matches".
+    selector = parts[0]
+    pattern = parts[1]
+    replacement = ''
+  }
+  const bareMatch = BARE_SUFFIX_RE.exec(selector.trim())
+  if (bareMatch) {
+    return {
+      selector: '',
+      steps: null,
+      bare: true,
+      suffix: normalizeSuffix(bareMatch[1]),
+      index: null,
+      pattern,
+      replacement,
+      onlyFirst
+    }
   }
   // Legado allows the index before the suffix (a.0@href) or after it (a@href.0).
   const leading = extractIndex(selector)
   selector = leading.selector
   let index = leading.index
   const suffixMatch = SUFFIX_RE.exec(selector)
-  const suffix = suffixMatch ? suffixMatch[1].toLowerCase() : 'text'
+  let suffix = 'text'
   if (suffixMatch) {
+    suffix = normalizeSuffix(suffixMatch[1])
     selector = selector.slice(0, suffixMatch.index)
-    if (index === null) {
+    if (index === null && !hasLegadoSyntax(selector)) {
       const trailing = extractIndex(selector)
       selector = trailing.selector
       index = trailing.index
     }
   }
-  return { selector: selector.trim(), suffix, index, pattern, replacement, onlyFirst }
+  if (hasLegadoSyntax(selector)) {
+    return {
+      selector: '',
+      steps: parseSteps(selector),
+      bare: false,
+      suffix,
+      index: null,
+      pattern,
+      replacement,
+      onlyFirst
+    }
+  }
+  return { selector: selector.trim(), steps: null, bare: false, suffix, index, pattern, replacement, onlyFirst }
 }
 
 function jsonValues(path: string, value: unknown, suffix: string): string[] {
@@ -227,34 +312,77 @@ function jsonValues(path: string, value: unknown, suffix: string): string[] {
   })
 }
 
-function htmlValues(selector: string, suffix: string, doc: { html: string }): string[] {
-  // Bare suffix rules address the item element itself, so they load in
-  // fragment mode. Selector-bearing rules keep the full document tree, since
-  // a fragment parse drops <html>/<body> and "body ..." selectors would miss.
-  const $ = selector ? load(doc.html) : load(doc.html, null, false)
-  const nodes = selector ? $(selector) : $.root().children()
+function valuesFromNodes($: CheerioAPI, nodes: AnyNode[], suffix: string): string[] {
   const values: string[] = []
-  nodes.each((_index, node) => {
+  for (const node of nodes) {
     if (suffix === 'href' || suffix === 'src') {
       const value = $(node).attr(suffix)
       if (value) values.push(value)
-      return
+      continue
     }
     if (suffix === 'html') {
       values.push($.html(node))
-      return
+      continue
     }
     if (suffix === 'owntext') {
       values.push($(node).clone().children().remove().end().text())
-      return
+      continue
     }
     if (suffix === 'textnode') {
       values.push($(node).contents().filter((_i, child) => child.type === 'text').text())
-      return
+      continue
     }
     values.push($(node).text())
-  })
+  }
   return values
+}
+
+function selectChain($: CheerioAPI, steps: SelectorStep[]): Cheerio<AnyNode> {
+  let selection: Cheerio<AnyNode> | null = null
+  for (const step of steps) {
+    let found: Cheerio<AnyNode> =
+      selection === null ? $(step.selector) : selection.find(step.selector)
+    if (step.exclude !== null) {
+      const skip = step.exclude < 0 ? found.length + step.exclude : step.exclude
+      found = found.filter((index: number) => index !== skip)
+    }
+    if (step.index !== null) found = found.eq(step.index)
+    selection = found
+  }
+  return selection ?? $.root().children()
+}
+
+function htmlValues(parts: SegmentParts, doc: { html: string }): string[] {
+  // Bare suffix rules address the item element itself, so they load in
+  // fragment mode. Selector-bearing rules keep the full document tree, since
+  // a fragment parse drops <html>/<body> and "body ..." selectors would miss.
+  if (!parts.steps && !parts.selector) {
+    const $ = load(doc.html, null, false)
+    return valuesFromNodes($, $.root().children().toArray(), parts.suffix)
+  }
+  const $ = load(doc.html)
+  if (parts.steps) {
+    return valuesFromNodes($, selectChain($, parts.steps).toArray(), parts.suffix)
+  }
+  const selector = parts.selector.replace(/^@css:/i, '')
+  if (!selector) {
+    const fragment = load(doc.html, null, false)
+    return valuesFromNodes(fragment, fragment.root().children().toArray(), parts.suffix)
+  }
+  return valuesFromNodes($, $(selector).toArray(), parts.suffix)
+}
+
+/** Serializes the nodes matched by a list rule (bookList/chapterList). */
+export function selectRuleItems(rule: string, html: string): string[] {
+  const parts = parseSegment(rule)
+  const $ = load(html)
+  const selector = parts.steps ? '' : parts.selector.replace(/^@css:/i, '')
+  const nodes = parts.steps
+    ? selectChain($, parts.steps).toArray()
+    : selector
+      ? $(selector).toArray()
+      : $.root().children().toArray()
+  return nodes.map((node) => $.html(node))
 }
 
 function evaluateSegment(parts: SegmentParts, doc: RuleDocument): { values: string[]; warnings: string[] } {
@@ -272,7 +400,7 @@ function evaluateSegment(parts: SegmentParts, doc: RuleDocument): { values: stri
         const path = selector || '$'
         values = jsonValues(path, doc.value, parts.suffix)
       } else {
-        values = htmlValues(selector, parts.suffix, doc)
+        values = htmlValues(parts, doc)
       }
     }
     if (parts.index !== null) {

@@ -100,6 +100,50 @@ describe('booksource rules', () => {
     ).toEqual(['书'])
   })
 
+  it('accepts bare text/href suffixes and removal regexes', () => {
+    const doc = {
+      kind: 'html' as const,
+      html: '<a href="/c/1">第一章 正文卷</a>',
+      url: 'https://example.com'
+    }
+    expect(evaluateRule('text', doc, { baseUrl: 'https://example.com' }).values).toEqual([
+      '第一章 正文卷'
+    ])
+    expect(evaluateRule('href', doc, { baseUrl: 'https://example.com' }).values).toEqual(['/c/1'])
+    expect(evaluateRule('text##正文卷.*', doc, { baseUrl: 'https://example.com' }).values).toEqual([
+      '第一章 '
+    ])
+    expect(evaluateRule('textNodes', doc, { baseUrl: 'https://example.com' }).values).toEqual([
+      '第一章 正文卷'
+    ])
+  })
+
+  it('understands Legado default selector chains', () => {
+    const doc = {
+      kind: 'html' as const,
+      html:
+        '<div id="chapterlist"><p><a href="/c/1">第1章</a></p><p><a href="/c/2">第2章</a></p></div>' +
+        '<ul class="dir"><li><a>甲</a></li><li><a>乙</a></li></ul>',
+      url: 'https://example.com'
+    }
+    const ctx = { baseUrl: 'https://example.com' }
+    expect(evaluateRule('id.chapterlist@p@a@href', doc, ctx).values).toEqual(['/c/1', '/c/2'])
+    expect(evaluateRule('class.dir@li@tag.a@text', doc, ctx).values).toEqual(['甲', '乙'])
+  })
+
+  it('applies indexes to the chain step they belong to', () => {
+    const doc = {
+      kind: 'html' as const,
+      html:
+        '<ul class="x"><li><a>a1</a></li></ul>' +
+        '<ul class="x"><li><a>b1</a><a>b2</a></li></ul>',
+      url: 'https://example.com'
+    }
+    expect(
+      evaluateRule('class.x.1@li@a.1@text', doc, { baseUrl: 'https://example.com' }).values
+    ).toEqual(['b2'])
+  })
+
   it('supports index syntax before and after the suffix', () => {
     const doc = {
       kind: 'html' as const,

@@ -1,7 +1,6 @@
-import { load } from 'cheerio'
 import { JSONPath } from 'jsonpath-plus'
 import type { RuleContext, RuleDocument } from './rules'
-import { evaluateRule } from './rules'
+import { evaluateRule, selectRuleItems } from './rules'
 import type { TocChapter } from './model'
 import { htmlToParagraphs } from './html'
 
@@ -122,11 +121,8 @@ function listDocuments(
     return values.map((value) => ({ doc: { kind: 'json', value, url: doc.url }, base: doc.url }))
   }
   if (/^@json:/i.test(selected)) throw new Error('这个书源要求 JSON，但响应是 HTML')
-  const selector = selected.replace(/^@css:/i, '')
-  const $ = load(doc.html)
-  const nodes = selector ? $(selector).toArray() : $.root().children().toArray()
-  return nodes.map((node) => ({
-    doc: { kind: 'html', html: $.html(node), url: doc.url },
+  return selectRuleItems(selected, doc.html).map((html) => ({
+    doc: { kind: 'html', html, url: doc.url },
     base: doc.url
   }))
 }

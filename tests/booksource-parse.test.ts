@@ -108,6 +108,30 @@ describe('booksource page parsing', () => {
     expect(content.nextUrl).toBeUndefined()
   })
 
+  it('parses toc rules written in Legado default syntax', () => {
+    const legadoRules = sourceRules({
+      ...definition,
+      ruleToc: {
+        chapterList: 'id.chapterlist@p@a',
+        chapterName: 'text',
+        chapterUrl: 'href'
+      }
+    })
+    const toc = parseTocPage(
+      documentFromResponse(
+        '<div id="chapterlist"><p><a href="/c/1">第1章</a></p><p><a href="/c/2">第2章</a></p></div>',
+        'text/html',
+        'https://example.com/book'
+      ),
+      legadoRules,
+      { baseUrl: 'https://example.com', bookUrl: 'https://example.com/book' }
+    )
+    expect(toc.chapters).toEqual([
+      { title: '第1章', url: 'https://example.com/c/1', level: 'chapter' },
+      { title: '第2章', url: 'https://example.com/c/2', level: 'chapter' }
+    ])
+  })
+
   it('reports a JSON response with a non-JSONPath rule', () => {
     const doc = documentFromResponse('{"books":[]}', 'application/json', 'https://example.com')
     expect(() => parseSearchPage(doc, rules, { baseUrl: 'https://example.com' }))
